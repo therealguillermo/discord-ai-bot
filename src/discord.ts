@@ -7,7 +7,7 @@ export function createDiscordClient(): Client {
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMembers, // privileged
-      GatewayIntentBits.GuildVoiceStates, // voice pay (and music later)
+      GatewayIntentBits.GuildVoiceStates, // voice pay + music
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent, // privileged
     ],

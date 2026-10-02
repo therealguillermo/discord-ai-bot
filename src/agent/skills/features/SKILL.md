@@ -159,6 +159,14 @@ start_vote_timeout({
 
 ---
 
+## music (see dedicated skill)
+
+**keywords:** play, skip, queue, join voice, leave voice
+
+Music has its own skill. Load `load_skill name="music" topic="play"` (or skip/queue/leave). Tools are `music_*` — not Discord REST.
+
+---
+
 ## generate image / draw
 
 **keywords:** image, draw, generate image, picture, art, paint

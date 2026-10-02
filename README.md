@@ -16,7 +16,8 @@ flowchart LR
 
 ## Requirements
 
-- Node.js 18.17 or newer (Node 20+ recommended)
+- Node.js **22.12+** for Discord voice / DAVE (music). `npm start` auto-selects Node 22 if your
+  shell still has an older Node (e.g. Hermes at `%LOCALAPPDATA%\hermes\node`). Override with `NODE_BINARY`.
 - An Anthropic API key
 - A Discord application with a bot user
 
@@ -80,10 +81,11 @@ Everything is an agent tool: mention the bot or use `/agent`. For example `@Bot 
 | Games | `play_blackjack`, `play_coinflip` | `@Bot blackjack, 50 coins` / `half` / `all`; `@Bot flip 20 on tails`. Bets are escrowed from the requester's own balance, settled once, and refunded if the bot crashes mid-hand. The agent can't influence cards, flips, or payouts. |
 | Moderation | `purge_messages`, `start_vote_timeout` | Purge needs Manage Messages and asks for confirmation. Vote timeout needs `VOTE_TIMEOUT_MIN_VOTES` yes votes. For an immediate timeout use `timeout_member`. |
 | Images | `generate_image` | Needs `OPENAI_API_KEY` (the tool tells you if it's missing). 30s cooldown per user. |
+| Music | `music_join`, `music_play`, `music_add`, `music_skip`, `music_stop`, `music_clear`, `music_queue`, `music_move`, `music_remove`, `music_pause`, `music_resume`, `music_leave` | Agent-controlled voice queue. Requires `yt-dlp` and `ffmpeg` on PATH (or `YTDLP_PATH` / `FFMPEG_PATH`). Requester must be in a voice channel. Load skill `music` for intent mapping. |
 
 Faceit and Minecraft control were removed. Old GearmyBot mapping: `?saveEconState` is gone (saving is automatic);
-`?econStatus` / `?leaderboard` → ask the agent for the leaderboard; `?chat` → mention the bot.
-Music (`?join`, `?play`, ...) is not ported yet.
+`?econStatus` / `?leaderboard` → ask the agent for the leaderboard; `?chat` → mention the bot;
+`?join` / `?play` / `?queue` → ask the agent (music_* tools).
 
 **Importing the old balances** (the old bot stored them by username in `gamblingModules/econ.json`). Stop the bot, then:
 
@@ -105,7 +107,18 @@ Tests: `npm test` (blackjack rules, bet parsing, and the economy store).
 | Meta | `discord_search_endpoints`, `discord_call` | Reach any other REST operation by searching for it and calling it by `operation_id` |
 
 Skills live in `src/agent/skills/<name>/SKILL.md`. The agent loads them on demand, e.g.
-`load_skill name="features" topic="blackjack"` or `load_skill name="discord-api" topic="mute"`.
+`load_skill name="music" topic="play"`, `load_skill name="features" topic="blackjack"`, or
+`load_skill name="discord-api" topic="mute"`.
+
+### Music host deps
+
+```bash
+# examples — use whatever installs yt-dlp + ffmpeg on your OS
+winget install yt-dlp.yt-dlp
+winget install Gyan.FFmpeg
+```
+
+The bot needs **Connect** and **Speak** in the voice channel. YouTube extraction can break when sites change; update yt-dlp when play fails.
 
 The meta-tools are backed by a registry generated from Discord's official OpenAPI spec
 (`src/tools/generated/endpoints.json`). Registering 240 separate tools would swamp the model's context, so the

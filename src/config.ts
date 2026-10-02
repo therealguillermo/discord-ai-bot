@@ -50,6 +50,26 @@ const schema = z.object({
 
   OPENAI_API_KEY: optStr,
   IMAGE_MODEL: z.string().min(1).default("gpt-image-1"),
+
+  /** yt-dlp binary name or absolute path (music feature). */
+  YTDLP_PATH: z.string().min(1).default("yt-dlp"),
+  /** FFmpeg binary name or absolute path (music feature). */
+  FFMPEG_PATH: z.string().min(1).default("ffmpeg"),
+  /**
+   * YouTube extractor clients. Defaults avoid SABR/403-prone clients.
+   * Override if yt-dlp docs recommend newer clients.
+   */
+  YTDLP_EXTRACTOR_ARGS: z
+    .string()
+    .min(1)
+    .default("youtube:player_client=android,tv_embedded,visionos"),
+  /** Format selector passed to yt-dlp `-f`. */
+  YTDLP_FORMAT: z.string().min(1).default("bestaudio/best"),
+  /**
+   * Optional: pass browser cookies to yt-dlp, e.g. "chrome" or "firefox".
+   * Helps when YouTube demands login / PO tokens. Leave unset for anonymous.
+   */
+  YTDLP_COOKIES_FROM_BROWSER: optStr,
 });
 
 function load() {
@@ -84,6 +104,11 @@ function load() {
     voteTimeoutMinVotes: e.VOTE_TIMEOUT_MIN_VOTES,
     openaiApiKey: e.OPENAI_API_KEY,
     imageModel: e.IMAGE_MODEL,
+    ytdlpPath: e.YTDLP_PATH,
+    ffmpegPath: e.FFMPEG_PATH,
+    ytdlpExtractorArgs: e.YTDLP_EXTRACTOR_ARGS,
+    ytdlpFormat: e.YTDLP_FORMAT,
+    ytdlpCookiesFromBrowser: e.YTDLP_COOKIES_FROM_BROWSER,
   };
 }
 

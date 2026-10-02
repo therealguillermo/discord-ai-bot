@@ -4,10 +4,17 @@ import { economyFeature } from "./economy/index.js";
 import { gamesFeature } from "./games/index.js";
 import { imagesFeature } from "./images/index.js";
 import { moderationFeature } from "./moderation/index.js";
+import { musicFeature } from "./music/index.js";
 import type { Feature } from "./types.js";
 
 /** Order matters: the economy must load before anything that spends coins. */
-export const features: Feature[] = [economyFeature, gamesFeature, moderationFeature, imagesFeature];
+export const features: Feature[] = [
+  economyFeature,
+  gamesFeature,
+  moderationFeature,
+  imagesFeature,
+  musicFeature,
+];
 
 /** Tools contributed by features, appended to the agent's toolbox. */
 export const featureTools: ToolDefinition[] = features.flatMap((f) => f.tools ?? []);
