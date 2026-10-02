@@ -13,7 +13,6 @@ import { isAuthorized, isChannelAllowed } from "./auth.js";
 import { config } from "./config.js";
 import { createDiscordClient, createRest } from "./discord.js";
 import { features, startFeatures, stopFeatures } from "./features/index.js";
-import { attachRouter } from "./features/router.js";
 import { audit, requestConfirmation } from "./safety/confirm.js";
 import { endpointCount } from "./tools/discordCall.js";
 import type { ToolContext } from "./tools/types.js";
@@ -288,13 +287,11 @@ client.once(Events.ClientReady, async (c) => {
     console.error("Failed to register slash commands (mentions will still work):", err);
   }
 
-  // Prefix-command features (economy, games, moderation, images).
-  // Attach the router only after they have started so nothing runs against unloaded state.
+  // Feature tools (economy, games, moderation, images) — all reached via the agent.
   try {
     await startFeatures(c);
-    attachRouter(client, features);
-    const count = features.reduce((n, f) => n + (f.commands?.length ?? 0), 0);
-    console.log(`Features ready: ${features.map((f) => f.name).join(", ")} (${count} commands, prefix "${config.prefix}").`);
+    const toolCount = features.reduce((n, f) => n + (f.tools?.length ?? 0), 0);
+    console.log(`Features ready: ${features.map((f) => f.name).join(", ")} (${toolCount} agent tools).`);
   } catch (err) {
     console.error("Failed to start features (the agent will still work):", err);
   }

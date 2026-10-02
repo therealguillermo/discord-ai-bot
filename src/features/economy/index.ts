@@ -1,7 +1,7 @@
-import type { Client } from "discord.js";
+import { Events, type Client } from "discord.js";
 import { config } from "../../config.js";
 import type { ToolDefinition } from "../../tools/types.js";
-import type { Feature, PrefixCommand } from "../types.js";
+import type { Feature } from "../types.js";
 import { economy, formatCoins, touch } from "./instance.js";
 
 /* -------------------------------------------------------------------------- */
@@ -32,49 +32,25 @@ function payVoice(client: Client): void {
 
 let payTimer: NodeJS.Timeout | null = null;
 
-/* -------------------------------------------------------------------------- */
-/* Commands                                                                   */
-/* -------------------------------------------------------------------------- */
-
-const coins: PrefixCommand = {
-  name: "coins",
-  aliases: ["balance", "bal"],
-  description: "Show your coin balance.",
-  execute: async (ctx) => {
-    const { balance, claimed } = touch(ctx.message.author);
-    const note = claimed > 0 ? `\nImported ${formatCoins(claimed)} coins from the old bot.` : "";
-    await ctx.reply(`You have **${formatCoins(balance)}** coins.${note}`);
-  },
-};
-
-const register: PrefixCommand = {
-  name: "register",
-  description: "Create your account (this happens automatically the first time you use any coin command).",
-  execute: async (ctx) => {
-    const { balance, created, claimed } = touch(ctx.message.author);
-    const note = claimed > 0 ? ` Imported ${formatCoins(claimed)} coins from the old bot.` : "";
-    await ctx.reply(
-      created
-        ? `Account created - you have **${formatCoins(balance)}** coins.${note}`
-        : `You're already registered with **${formatCoins(balance)}** coins.${note}`,
-    );
-  },
-};
-
-const leaderboard: PrefixCommand = {
-  name: "leaderboard",
-  aliases: ["top", "lb"],
-  description: "Show the richest members.",
-  execute: async (ctx) => {
-    const rows = economy.leaderboard(10);
-    if (rows.length === 0) {
-      await ctx.reply("Nobody has any coins yet.");
-      return;
-    }
-    const lines = rows.map((r, i) => `${i + 1}. <@${r.userId}> - ${formatCoins(r.balance)}`);
-    await ctx.reply(`**Top coin holders**\n${lines.join("\n")}`);
-  },
-};
+/** Ensure every human in the guild has an economy account (and pull legacy balances). */
+async function seedMembers(client: Client): Promise<void> {
+  const guild = await client.guilds.fetch(config.guildId).catch(() => null);
+  if (!guild) return;
+  await guild.members.fetch().catch((err) => {
+    console.error("[economy] failed to fetch members for seeding:", err);
+  });
+  let created = 0;
+  let claimed = 0;
+  for (const member of guild.members.cache.values()) {
+    if (member.user.bot) continue;
+    const result = touch(member.user);
+    if (result.created) created++;
+    claimed += result.claimed;
+  }
+  if (created > 0 || claimed > 0) {
+    console.log(`[economy] seeded ${created} new account(s); imported ${formatCoins(claimed)} legacy coins`);
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 /* Agent tools (read-only: the agent can never create or move coins)          */
@@ -82,15 +58,19 @@ const leaderboard: PrefixCommand = {
 
 const balanceTool: ToolDefinition = {
   name: "economy_balance",
-  description: "Look up a member's coin balance in the server's coin economy. Read-only.",
+  description:
+    "Look up a member's coin balance in the server's coin economy. Read-only. Accounts are created automatically " +
+    "when members join; use this when someone asks about their (or another's) balance.",
   input_schema: {
     type: "object",
     properties: { user_id: { type: "string", description: "Discord user ID." } },
     required: ["user_id"],
   },
-  handler: async (input) => {
+  handler: async (input, ctx) => {
     const userId = String(input.user_id ?? "");
     if (!/^\d{15,25}$/.test(userId)) throw new Error("user_id must be a Discord user ID.");
+    const user = await ctx.client.users.fetch(userId).catch(() => null);
+    if (user && !user.bot) touch(user);
     return { user_id: userId, registered: economy.has(userId), balance: economy.getBalance(userId) };
   },
 };
@@ -112,11 +92,25 @@ const leaderboardTool: ToolDefinition = {
 
 export const economyFeature: Feature = {
   name: "Economy",
-  commands: [coins, register, leaderboard],
   tools: [balanceTool, leaderboardTool],
   start: async (client) => {
     const { refunded } = await economy.load();
     if (refunded > 0) console.log(`[economy] refunded ${refunded} bet(s) left in escrow by a previous crash`);
+
+    await seedMembers(client);
+
+    client.on(Events.GuildMemberAdd, (member) => {
+      if (member.guild.id !== config.guildId || member.user.bot) return;
+      const { created, claimed } = touch(member.user);
+      if (created || claimed > 0) {
+        console.log(
+          `[economy] tracked <@${member.id}>` +
+            (created ? " (new account)" : "") +
+            (claimed > 0 ? ` (imported ${formatCoins(claimed)} legacy)` : ""),
+        );
+      }
+    });
+
     if (config.voicePayAmount > 0) {
       payTimer = setInterval(() => {
         try {

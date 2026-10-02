@@ -36,8 +36,7 @@ const schema = z.object({
   HISTORY_WINDOW: z.coerce.number().int().min(2).max(100).default(20),
   MAX_TURN_TOKENS: z.coerce.number().int().min(10_000).default(300_000),
 
-  // ---- Prefix-command features (economy, games, moderation, images) ----
-  COMMAND_PREFIX: z.string().min(1).max(3).default("?"),
+  // ---- Feature data (economy, games, moderation, images) ----
   DATA_DIR: z.string().min(1).default("data"),
 
   ECONOMY_STARTING_BALANCE: z.coerce.number().int().min(0).default(100),
@@ -77,7 +76,6 @@ function load() {
     historyWindow: e.HISTORY_WINDOW,
     maxTurnTokens: e.MAX_TURN_TOKENS,
 
-    prefix: e.COMMAND_PREFIX,
     dataDir: e.DATA_DIR,
     startingBalance: e.ECONOMY_STARTING_BALANCE,
     voicePayAmount: e.VOICE_PAY_AMOUNT,

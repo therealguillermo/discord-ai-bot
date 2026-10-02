@@ -5,6 +5,7 @@ import { DiscordAPIError } from "@discordjs/rest";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { config } from "../config.js";
 import { classifyRisk } from "../safety/confirm.js";
+import { DISCORD_INTENT_ALIASES } from "./discordAliases.js";
 import type { Endpoint, EndpointRegistry, JsonSchema } from "./endpointTypes.js";
 import type { ToolContext, ToolDefinition } from "./types.js";
 
@@ -226,12 +227,23 @@ function search(query: string, limit = 15): Endpoint[] {
     .map((t) => (t.length > 3 && t.endsWith("s") ? t.slice(0, -1) : t));
   if (tokens.length === 0) return [];
 
+  // Natural-language intents (mute, ban, purge, …) → boost the matching operation_ids.
+  const aliasBoost = new Map<string, number>();
+  for (const t of tokens) {
+    const ops = DISCORD_INTENT_ALIASES[t];
+    if (!ops) continue;
+    for (const op of ops) {
+      if (!byOperationId.has(op)) continue; // skip curated-only names like timeout_member
+      aliasBoost.set(op, (aliasBoost.get(op) ?? 0) + 8);
+    }
+  }
+
   const scored = registry.endpoints
     .map((e) => {
       const id = e.operationId.toLowerCase();
       const idWords = new Set(id.split("_").map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w)));
       const route = e.path.toLowerCase();
-      let score = 0;
+      let score = aliasBoost.get(e.operationId) ?? 0;
       for (const t of tokens) {
         if (idWords.has(t)) score += 3;
         else if (id.includes(t)) score += 2;
@@ -411,7 +423,8 @@ export const discordSearchEndpoints: ToolDefinition = {
   name: "discord_search_endpoints",
   description:
     "Search the full Discord REST API (about 240 operations) by keyword and get exact parameter/body schemas. " +
-    "Use this when no dedicated tool covers what you need. Provide `query` to find operations " +
+    "Prefer load_skill name=\"discord-api\" topic=\"…\" first for common admin intents (mute, ban, purge, …); " +
+    "use this when you need the live schema or an uncommon operation. Provide `query` to find operations " +
     "(e.g. \"create webhook\", \"list scheduled events\"), `operation_id` for full parameter and body details of one " +
     "operation, or `schema` for details of a named nested type.",
   input_schema: {

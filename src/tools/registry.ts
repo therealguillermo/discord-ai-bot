@@ -3,9 +3,16 @@ import { featureTools } from "../features/index.js";
 import { audit } from "../safety/confirm.js";
 import { curatedTools } from "./curated.js";
 import { discordCall, discordSearchEndpoints } from "./discordCall.js";
+import { loadSkill } from "./skills.js";
 import type { ToolContext, ToolDefinition } from "./types.js";
 
-export const allTools: ToolDefinition[] = [...curatedTools, ...featureTools, discordSearchEndpoints, discordCall];
+export const allTools: ToolDefinition[] = [
+  loadSkill,
+  ...curatedTools,
+  ...featureTools,
+  discordSearchEndpoints,
+  discordCall,
+];
 
 const byName = new Map(allTools.map((t) => [t.name, t]));
 

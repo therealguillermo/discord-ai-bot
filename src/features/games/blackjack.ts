@@ -11,7 +11,7 @@ import {
   type User,
 } from "discord.js";
 import { economy, formatCoins, touch } from "../economy/instance.js";
-import { UserError, type PrefixCommand } from "../types.js";
+import { UserError } from "../types.js";
 import { parseBet } from "./bet.js";
 import { BlackjackGame, handValue, type Card, type Outcome } from "./blackjackEngine.js";
 
@@ -55,7 +55,7 @@ export interface TableMessage {
   components: ActionRowBuilder<ButtonBuilder>[];
 }
 
-/** How a hand posts its table: a prefix-command reply, or a plain channel send. */
+/** How a hand posts its table (channel send from the agent tool). */
 export type TableSender = (message: TableMessage) => Promise<Message>;
 
 type Renderer = (game: BlackjackGame) => Promise<Buffer>;
@@ -163,7 +163,7 @@ export interface BlackjackStart {
 
 /**
  * Deal a hand for `user`. Throws UserError for anything the player should be told (bad bet,
- * not enough coins, hand already running). Shared by the `?blackjack` command and the agent tool.
+ * not enough coins, hand already running). Used by the agent tool.
  */
 export async function startBlackjack(params: {
   user: User;
@@ -322,21 +322,3 @@ function offerAgain(msg: Message, user: User, bet: number, send: TableSender): v
     await msg.edit({ components: [] }).catch(() => undefined);
   });
 }
-
-/* -------------------------------------------------------------------------- */
-/* ?blackjack                                                                 */
-/* -------------------------------------------------------------------------- */
-
-export const blackjack: PrefixCommand = {
-  name: "blackjack",
-  aliases: ["bj"],
-  usage: "<bet|half|all>",
-  description: "Play a hand of blackjack (blackjack pays 3:2, dealer stands on 17).",
-  execute: async (ctx) => {
-    await startBlackjack({
-      user: ctx.message.author,
-      betArg: ctx.args[0],
-      send: (m) => ctx.reply(m),
-    });
-  },
-};

@@ -1,12 +1,12 @@
 import { resolveSendableChannel } from "../../tools/channels.js";
 import type { ToolDefinition } from "../../tools/types.js";
 import type { Feature } from "../types.js";
-import { blackjack, startBlackjack } from "./blackjack.js";
-import { coinflip } from "./coinflip.js";
+import { startBlackjack } from "./blackjack.js";
+import { runCoinflip } from "./coinflip.js";
 
 /**
  * The agent can deal a hand, but it cannot touch the outcome: the bet is escrowed from the requester's own
- * account by the same code as `?blackjack`, the cards come from a secure shuffle, and only the requester can
+ * account by deterministic code, the cards come from a secure shuffle, and only the requester can
  * press the Hit / Stand / Double buttons.
  */
 const playBlackjack: ToolDefinition = {
@@ -54,8 +54,52 @@ const playBlackjack: ToolDefinition = {
   },
 };
 
+/**
+ * Same trust model as blackjack: the flip and payout are decided in code; the agent only starts the flip
+ * when the requester asks and posts nothing about the outcome itself.
+ */
+const playCoinflip: ToolDefinition = {
+  name: "play_coinflip",
+  description:
+    "Flip a coin for double-or-nothing using the requester's OWN coins. The result is posted in the channel by " +
+    "deterministic code — do not invent or restate the flip outcome beyond a short acknowledgement. Only use when " +
+    "the requester clearly asks to flip / coinflip / cf. Pass bet and side exactly as they said them.",
+  input_schema: {
+    type: "object",
+    properties: {
+      bet: {
+        type: "string",
+        description: 'A whole number of coins, "half" (half their balance) or "all" (their whole balance).',
+      },
+      side: {
+        type: "string",
+        description: 'Optional call: "heads" or "tails" (default heads).',
+      },
+    },
+    required: ["bet"],
+  },
+  handler: async (input, ctx) => {
+    const channel = await resolveSendableChannel(ctx);
+    const user = await ctx.client.users.fetch(ctx.requesterId);
+    const result = await runCoinflip({
+      user,
+      betArg: String(input.bet ?? ""),
+      sideArg: input.side === undefined || input.side === null || input.side === "" ? undefined : String(input.side),
+    });
+    await channel.send({ content: result.message, allowedMentions: { parse: [] } });
+    return {
+      ok: true,
+      bet: result.bet,
+      call: result.call,
+      result: result.result,
+      won: result.won,
+      balance: result.balance,
+      note: "Result already posted in the channel. Reply in one short line; do not restate the flip.",
+    };
+  },
+};
+
 export const gamesFeature: Feature = {
   name: "Games",
-  commands: [blackjack, coinflip],
-  tools: [playBlackjack],
+  tools: [playBlackjack, playCoinflip],
 };

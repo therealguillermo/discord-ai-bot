@@ -1,35 +1,49 @@
 import { randomInt } from "node:crypto";
+import type { User } from "discord.js";
 import { economy, formatCoins, touch } from "../economy/instance.js";
-import { UserError, type PrefixCommand } from "../types.js";
+import { UserError } from "../types.js";
 import { parseBet } from "./bet.js";
 
 const SIDES: Record<string, "heads" | "tails"> = { h: "heads", heads: "heads", t: "tails", tails: "tails" };
 
-export const coinflip: PrefixCommand = {
-  name: "cf",
-  aliases: ["coinflip", "flip"],
-  usage: "<bet|half|all> [heads|tails]",
-  description: "Flip a coin for double or nothing.",
-  execute: async (ctx) => {
-    const { balance } = touch(ctx.message.author);
-    const bet = parseBet(ctx.args[0], balance);
-    if (!bet.ok) throw new UserError(bet.error);
+export interface CoinflipResult {
+  call: "heads" | "tails";
+  result: "heads" | "tails";
+  won: boolean;
+  bet: number;
+  balance: number;
+  /** Ready-to-post Discord message with the outcome. */
+  message: string;
+}
 
-    const sideArg = ctx.args[1]?.toLowerCase();
-    const call = sideArg ? SIDES[sideArg] : "heads";
-    if (!call) throw new UserError("Pick `heads` or `tails` (or leave it out).");
+/**
+ * Flip a coin for `user`. Throws UserError for bad bets / side. The agent must post `message` as-is;
+ * the flip is decided here, not by the model.
+ */
+export async function runCoinflip(params: {
+  user: User;
+  betArg: string | undefined;
+  sideArg?: string;
+}): Promise<CoinflipResult> {
+  const { user } = params;
+  const { balance } = touch(user);
+  const bet = parseBet(params.betArg, balance);
+  if (!bet.ok) throw new UserError(bet.error);
 
-    const holdId = economy.hold(ctx.message.author.id, bet.amount);
-    if (!holdId) throw new UserError(`You only have ${formatCoins(economy.getBalance(ctx.message.author.id))} coins.`);
+  const sideArg = params.sideArg?.toLowerCase();
+  const call = sideArg ? SIDES[sideArg] : "heads";
+  if (!call) throw new UserError("Pick `heads` or `tails` (or leave it out).");
 
-    const result = randomInt(2) === 0 ? "heads" : "tails";
-    const won = result === call;
-    const { balance: newBalance } = economy.settle(holdId, won ? bet.amount * 2 : 0);
+  const holdId = economy.hold(user.id, bet.amount);
+  if (!holdId) throw new UserError(`You only have ${formatCoins(economy.getBalance(user.id))} coins.`);
 
-    await ctx.reply(
-      won
-        ? `🪙 **${result}!** You called ${call} and won **${formatCoins(bet.amount)}** coins. Balance: ${formatCoins(newBalance)}`
-        : `🪙 **${result}.** You called ${call} and lost **${formatCoins(bet.amount)}** coins. Balance: ${formatCoins(newBalance)}`,
-    );
-  },
-};
+  const result = randomInt(2) === 0 ? "heads" : "tails";
+  const won = result === call;
+  const { balance: newBalance } = economy.settle(holdId, won ? bet.amount * 2 : 0);
+
+  const message = won
+    ? `🪙 **${result}!** You called ${call} and won **${formatCoins(bet.amount)}** coins. Balance: ${formatCoins(newBalance)}`
+    : `🪙 **${result}.** You called ${call} and lost **${formatCoins(bet.amount)}** coins. Balance: ${formatCoins(newBalance)}`;
+
+  return { call, result, won, bet: bet.amount, balance: newBalance, message };
+}

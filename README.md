@@ -71,28 +71,18 @@ work. Tool results are not remembered between requests.
 
 ## Features
 
-Most features are agent tools: just ask. For example `@Bot purge the last 20 messages` or `@Bot draw a cat in a spacesuit`.
+Everything is an agent tool: mention the bot or use `/agent`. For example `@Bot purge the last 20 messages`,
+`@Bot how many coins do I have?`, or `@Bot blackjack for 50`.
 
 | Feature | Agent tools | Notes |
 | --- | --- | --- |
-| Moderation | `purge_messages` | Needs Manage Messages for the bot. Asks for confirmation. Leaves your request message alone. |
+| Economy | `economy_balance`, `economy_leaderboard` (read-only) | Accounts are keyed by Discord user ID and created automatically when a member joins (and for everyone already in the server on startup). Members earn coins in voice chat (`VOICE_PAY_*`). The agent can never mint or gift coins. |
+| Games | `play_blackjack`, `play_coinflip` | `@Bot blackjack, 50 coins` / `half` / `all`; `@Bot flip 20 on tails`. Bets are escrowed from the requester's own balance, settled once, and refunded if the bot crashes mid-hand. The agent can't influence cards, flips, or payouts. |
+| Moderation | `purge_messages`, `start_vote_timeout` | Purge needs Manage Messages and asks for confirmation. Vote timeout needs `VOTE_TIMEOUT_MIN_VOTES` yes votes. For an immediate timeout use `timeout_member`. |
 | Images | `generate_image` | Needs `OPENAI_API_KEY` (the tool tells you if it's missing). 30s cooldown per user. |
-| Games | `play_blackjack` | `@Bot blackjack, 50 coins` / `half` / `all`. Deals from the requester's own balance; the agent can't influence the cards or result. |
-| Economy | `economy_balance`, `economy_leaderboard` (read-only) | The agent can never change coins. |
 
-### Prefix commands (still deterministic, no AI)
-
-Coins, games and the community vote stay as prefix commands on purpose: the agent must not be able to move coins.
-These work for **everyone** in the server. The prefix is `COMMAND_PREFIX` (default `?`). Run `?help` for the live list.
-
-| Feature | Commands | Notes |
-| --- | --- | --- |
-| Economy | `?coins`, `?register`, `?leaderboard` | Accounts are keyed by Discord user ID. Members earn coins in voice chat (`VOICE_PAY_*`). |
-| Games | `?blackjack <bet\|half\|all>`, `?cf <bet\|half\|all> [heads\|tails]` | Bets are escrowed, settled once, and refunded if the bot crashes mid-hand. Only the player can press the buttons. |
-| Moderation | `?votetimeout @user [minutes]` | Vote needs `VOTE_TIMEOUT_MIN_VOTES` yes votes. (For an immediate timeout ask the agent.) |
-
-Moved into the agent: `?purge` and `?image`. Faceit and Minecraft control were removed. Old GearmyBot mapping:
-`?saveEconState` is gone (saving is automatic); `?econStatus` is `?leaderboard`; `?chat` is replaced by mentioning the bot.
+Faceit and Minecraft control were removed. Old GearmyBot mapping: `?saveEconState` is gone (saving is automatic);
+`?econStatus` / `?leaderboard` → ask the agent for the leaderboard; `?chat` → mention the bot.
 Music (`?join`, `?play`, ...) is not ported yet.
 
 **Importing the old balances** (the old bot stored them by username in `gamblingModules/econ.json`). Stop the bot, then:
@@ -101,7 +91,7 @@ Music (`?join`, `?play`, ...) is not ported yet.
 npm run import:legacy -- "C:\path\to\DiscordBot-GearmyBot-\gamblingModules\econ.json"
 ```
 
-Each person's old balance is added automatically the first time they use a coin command (matched on their current username).
+Each person's old balance is claimed automatically when their account is created (on join or startup seed), matched on their current username.
 
 Tests: `npm test` (blackjack rules, bet parsing, and the economy store).
 
@@ -109,9 +99,13 @@ Tests: `npm test` (blackjack rules, bet parsing, and the economy store).
 
 | Layer | Tools | Purpose |
 | --- | --- | --- |
+| Skills | `load_skill` | On-demand playbooks (e.g. `discord-api`) mapping intents like "mute" to the right tool/endpoint |
 | Curated | `send_message`, `read_messages`, `list_channels`, `create_channel`, `list_roles`, `find_members`, `manage_roles`, `kick_member`, `timeout_member` | Clean schemas for routine actions |
-| Feature | `purge_messages`, `generate_image`, `play_blackjack`, `economy_*` | See [Features](#features) |
+| Feature | `purge_messages`, `generate_image`, `play_blackjack`, `play_coinflip`, `start_vote_timeout`, `economy_*` | See [Features](#features) |
 | Meta | `discord_search_endpoints`, `discord_call` | Reach any other REST operation by searching for it and calling it by `operation_id` |
+
+Skills live in `src/agent/skills/<name>/SKILL.md`. The agent loads them on demand, e.g.
+`load_skill name="features" topic="blackjack"` or `load_skill name="discord-api" topic="mute"`.
 
 The meta-tools are backed by a registry generated from Discord's official OpenAPI spec
 (`src/tools/generated/endpoints.json`). Registering 240 separate tools would swamp the model's context, so the
@@ -163,13 +157,13 @@ src/auth.ts               authorization gate
 src/discord.ts            Discord client and REST factory
 src/agent/loop.ts         Claude tool-use loop and per-channel history
 src/agent/prompt.ts       system prompt
+src/agent/skills/         on-demand agent playbooks (discord-api, …)
 src/tools/registry.ts     tool list, Anthropic tool format, dispatch
 src/tools/curated.ts      first-class tools
 src/tools/discordCall.ts  meta-tools and the guarded REST executor
 src/safety/confirm.ts     risk classification, confirmation buttons, audit log
-src/features/             features: agent tools (all) plus prefix commands (economy, games, vote timeout)
+src/features/             feature agent tools (economy, games, moderation, images)
 src/tools/channels.ts     channel resolution shared by tools
-src/features/router.ts    prefix parsing, access checks, cooldowns, ?help
 scripts/gen-endpoints.ts  OpenAPI spec to endpoint registry
 ```
 
