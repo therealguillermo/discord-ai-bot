@@ -1,0 +1,31 @@
+{
+  "name": "discord-bot-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord bot controlled by a Claude tool-use agent",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "gen:endpoints": "tsx scripts/gen-endpoints.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@discordjs/rest": "^2.4.0",
+    "ajv": "^8.20.0",
+    "discord-api-types": "^0.37.100",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

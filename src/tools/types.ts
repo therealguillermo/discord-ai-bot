@@ -1,0 +1,25 @@
+import type Anthropic from "@anthropic-ai/sdk";
+import type { Client } from "discord.js";
+import type { REST } from "@discordjs/rest";
+
+/** Everything a tool handler needs to act on Discord on behalf of a requester. */
+export interface ToolContext {
+  client: Client;
+  rest: REST;
+  guildId: string;
+  requesterId: string;
+  channelId: string;
+  /** Ask the requester to approve a destructive action. Resolves false if denied/timeout. */
+  confirm: (summary: string) => Promise<boolean>;
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: Anthropic.Tool.InputSchema;
+  /** If true the dispatcher asks for confirmation before running the handler. */
+  destructive?: boolean;
+  /** Human-readable one-liner used in confirmation prompts. */
+  describeAction?: (input: Record<string, unknown>) => string;
+  handler: (input: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
+}
