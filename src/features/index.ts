@@ -1,5 +1,6 @@
 import type { Client } from "discord.js";
 import type { ToolDefinition } from "../tools/types.js";
+import { csTrackerFeature } from "./cs-tracker/index.js";
 import { economyFeature } from "./economy/index.js";
 import { gamesFeature } from "./games/index.js";
 import { imagesFeature } from "./images/index.js";
@@ -14,6 +15,7 @@ export const features: Feature[] = [
   moderationFeature,
   imagesFeature,
   musicFeature,
+  csTrackerFeature,
 ];
 
 /** Tools contributed by features, appended to the agent's toolbox. */

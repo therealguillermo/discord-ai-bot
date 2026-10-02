@@ -11,7 +11,7 @@ export const loadSkill: ToolDefinition = {
     "Load an agent skill (playbook). Call with no args to list skills. Call with `name` for the skill index, " +
     "or `name` + `topic` for a specific intent. Skills: " +
     "`music` (play/skip/queue/leave — e.g. topic=\"play\"), " +
-    "`features` (coins, blackjack, coinflip, purge, vote timeout, images — e.g. topic=\"coinflip\"), " +
+    "`features` (coins, blackjack, coinflip, purge, vote timeout, images, cs tracker — e.g. topic=\"coinflip\"), " +
     "`discord-api` (mute/ban/channels/roles and other REST ops — e.g. topic=\"mute\"). " +
     "Load the matching skill before guessing tools or searching 240+ Discord endpoints cold.",
   input_schema: {

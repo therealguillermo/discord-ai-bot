@@ -70,6 +70,21 @@ const schema = z.object({
    * Helps when YouTube demands login / PO tokens. Leave unset for anonymous.
    */
   YTDLP_COOKIES_FROM_BROWSER: optStr,
+
+  // ---- CS tracker (Discord ↔ Steam links + multi-provider dossiers) ----
+  CSREP_API_KEY: optStr,
+  FACEIT_API_KEY: optStr,
+  STEAM_WEB_API_KEY: optStr,
+  CSST_API_KEY: optStr,
+  CSST_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => (v == null || v.trim() === "" ? true : !/^(0|false|no|off)$/i.test(v.trim()))),
+  CSTRACKER_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => (v == null || v.trim() === "" ? true : !/^(0|false|no|off)$/i.test(v.trim()))),
+  CS_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).max(3600).default(120),
 });
 
 function load() {
@@ -109,6 +124,14 @@ function load() {
     ytdlpExtractorArgs: e.YTDLP_EXTRACTOR_ARGS,
     ytdlpFormat: e.YTDLP_FORMAT,
     ytdlpCookiesFromBrowser: e.YTDLP_COOKIES_FROM_BROWSER,
+
+    csrepApiKey: e.CSREP_API_KEY,
+    faceitApiKey: e.FACEIT_API_KEY,
+    steamWebApiKey: e.STEAM_WEB_API_KEY,
+    csstApiKey: e.CSST_API_KEY,
+    csstEnabled: e.CSST_ENABLED,
+    cstrackerEnabled: e.CSTRACKER_ENABLED,
+    csCacheTtlSeconds: e.CS_CACHE_TTL_SECONDS,
   };
 }
 

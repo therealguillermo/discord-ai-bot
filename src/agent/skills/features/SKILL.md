@@ -2,7 +2,8 @@
 name: features
 description: >-
   Server features beyond raw Discord admin: coins/economy, blackjack, coinflip,
-  purge, vote timeout, and AI image generation — which tool to call and the rules.
+  purge, vote timeout, AI image generation, and CS tracker (Steam links + player
+  dossiers) — which tool to call and the rules.
 ---
 
 # Features skill
@@ -167,6 +168,39 @@ Music has its own skill. Load `load_skill name="music" topic="play"` (or skip/qu
 
 ---
 
+## CS tracker / Steam / FACEIT / trust
+
+**keywords:** cs, cs2, steam, faceit, leetify, premier, trust, vac, csrep, csst, cstracker, link steam, my rank
+
+**prefer tools:** `cs_player`, `cs_link_steam`, `cs_list_links`, `cs_compare`, `cs_leaderboard`
+
+```
+cs_link_steam({ steam: "<SteamID64|profile URL|vanity>", label?: "main", primary?: true })
+cs_list_links({ user_id?: "<snowflake>" })
+cs_player({ steam?: "...", user_id?: "<snowflake>", all?: false, refresh?: false })
+cs_compare({ targets: [{ user_id: "..." }, { steam: "..." }] })
+cs_leaderboard({ limit?: 15 })
+cs_search({ query: "<name>" })   // needs CSREP_API_KEY
+cs_refresh({ steam?: "...", user_id?: "..." })
+cs_unlink_steam({ steam: "<id|label>" })
+cs_set_primary({ steam: "<id|label>" })
+```
+
+**rules:**
+- One Discord user can link **many** Steam accounts. Steam IDs are unique guild-wide.
+- Tools fetch and merge CSRep + CSST + CSTracker (+ Faceit/Steam when keyed). You **format** the reply from the dossier — never invent ranks, bans, or trust scores.
+- If `sources` shows errors/skipped or `errors` is present, say what was missing.
+- For "what's my CS / faceit?", call `cs_player` with no args (uses requester's primary link). If unlink/no link, tell them to send a Steam profile URL and call `cs_link_steam`.
+- Resolve Discord names with `find_members` before `user_id`.
+- Build Discord messages/embeds dynamically from dossier sections (`identity`, `cs2`, `faceit`, `leetify`, `trust`, `bans`, `links`).
+
+**example:** "what's dubbus's faceit?"
+1. `find_members` → user_id (or use steam URL if they pasted one)
+2. `cs_player` user_id=… (or steam=…)
+3. Reply from `dossier.faceit` / related sections only.
+
+---
+
 ## generate image / draw
 
 **keywords:** image, draw, generate image, picture, art, paint
@@ -200,3 +234,6 @@ generate_image({
 | vote timeout @user | `start_vote_timeout` | not immediate mute |
 | mute @user now | `timeout_member` | use `discord-api` skill |
 | draw / generate image | `generate_image` | cooldown; needs OpenAI key |
+| CS / faceit / steam / trust | `cs_player` | link first via `cs_link_steam` |
+| link my steam | `cs_link_steam` | SteamID64 or profile URL |
+| CS leaderboard | `cs_leaderboard` | CSTracker best-effort |

@@ -82,8 +82,9 @@ Everything is an agent tool: mention the bot or use `/agent`. For example `@Bot 
 | Moderation | `purge_messages`, `start_vote_timeout` | Purge needs Manage Messages and asks for confirmation. Vote timeout needs `VOTE_TIMEOUT_MIN_VOTES` yes votes. For an immediate timeout use `timeout_member`. |
 | Images | `generate_image` | Needs `OPENAI_API_KEY` (the tool tells you if it's missing). 30s cooldown per user. |
 | Music | `music_join`, `music_play`, `music_add`, `music_skip`, `music_stop`, `music_clear`, `music_queue`, `music_move`, `music_remove`, `music_pause`, `music_resume`, `music_leave` | Agent-controlled voice queue. Requires `yt-dlp` and `ffmpeg` on PATH (or `YTDLP_PATH` / `FFMPEG_PATH`). Requester must be in a voice channel. Load skill `music` for intent mapping. |
+| CS Tracker | `cs_link_steam`, `cs_unlink_steam`, `cs_list_links`, `cs_set_primary`, `cs_player`, `cs_compare`, `cs_search`, `cs_refresh`, `cs_leaderboard` | Discord user → many Steam accounts (`data/cs-links.json`). `cs_player` merges CSRep + CSST + CSTracker (optional Faceit/Steam Web API). Set `CSREP_API_KEY` / `FACEIT_API_KEY` / `STEAM_WEB_API_KEY` as available. Agent formats replies from the dossier — does not invent stats. |
 
-Faceit and Minecraft control were removed. Old GearmyBot mapping: `?saveEconState` is gone (saving is automatic);
+Minecraft control was removed from the old GearmyBot port. Old GearmyBot mapping: `?saveEconState` is gone (saving is automatic);
 `?econStatus` / `?leaderboard` → ask the agent for the leaderboard; `?chat` → mention the bot;
 `?join` / `?play` / `?queue` → ask the agent (music_* tools).
 
