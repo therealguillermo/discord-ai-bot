@@ -26,7 +26,8 @@ flowchart LR
 
 1. Create a key at <https://console.anthropic.com>.
 2. Put it in `.env` as `ANTHROPIC_API_KEY`.
-3. Set `ANTHROPIC_MODEL` to a model your key can use (default: `claude-sonnet-4-5`).
+3. Set `ANTHROPIC_MODEL` to a model your key can use (default: `claude-sonnet-5`). Run `npm run models` to list
+   the IDs available to your key.
 
 ### 2. Discord application and bot token
 

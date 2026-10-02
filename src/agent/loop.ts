@@ -59,7 +59,7 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
   const system: Anthropic.TextBlockParam[] = [
     {
       type: "text",
-      text: buildSystemPrompt({ guildName: req.guildName, guildId: req.ctx.guildId, botName: req.botName }),
+      text: buildSystemPrompt({ guildName: req.guildName, guildId: req.ctx.guildId, botName: req.botName, ownerId: config.ownerId }),
       cache_control: { type: "ephemeral" },
     },
   ];

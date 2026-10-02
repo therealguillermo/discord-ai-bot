@@ -12,7 +12,8 @@
     "start": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "gen:endpoints": "tsx scripts/gen-endpoints.ts"
+    "gen:endpoints": "tsx scripts/gen-endpoints.ts",
+    "models": "tsx scripts/list-models.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

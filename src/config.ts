@@ -17,7 +17,7 @@ const idList = z
 
 const schema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY is required"),
-  ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-4-5"),
+  ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-5"),
   DISCORD_BOT_TOKEN: z.string().min(1, "DISCORD_BOT_TOKEN is required"),
   DISCORD_APP_ID: snowflake,
   DISCORD_GUILD_ID: snowflake,
