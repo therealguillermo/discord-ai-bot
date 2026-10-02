@@ -1,10 +1,11 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { featureTools } from "../features/index.js";
 import { audit } from "../safety/confirm.js";
 import { curatedTools } from "./curated.js";
 import { discordCall, discordSearchEndpoints } from "./discordCall.js";
 import type { ToolContext, ToolDefinition } from "./types.js";
 
-export const allTools: ToolDefinition[] = [...curatedTools, discordSearchEndpoints, discordCall];
+export const allTools: ToolDefinition[] = [...curatedTools, ...featureTools, discordSearchEndpoints, discordCall];
 
 const byName = new Map(allTools.map((t) => [t.name, t]));
 

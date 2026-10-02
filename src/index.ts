@@ -12,6 +12,8 @@ import { runAgent, clearHistory } from "./agent/loop.js";
 import { isAuthorized, isChannelAllowed } from "./auth.js";
 import { config } from "./config.js";
 import { createDiscordClient, createRest } from "./discord.js";
+import { features, startFeatures, stopFeatures } from "./features/index.js";
+import { attachRouter } from "./features/router.js";
 import { audit, requestConfirmation } from "./safety/confirm.js";
 import { endpointCount } from "./tools/discordCall.js";
 import type { ToolContext } from "./tools/types.js";
@@ -92,6 +94,7 @@ async function handleRequest(params: {
   requesterId: string;
   requesterName: string;
   channelId: string;
+  triggerMessageId?: string;
   channel: SendableChannels | null;
   guildName: string;
   text: string;
@@ -104,6 +107,7 @@ async function handleRequest(params: {
     guildId: config.guildId,
     requesterId: params.requesterId,
     channelId: params.channelId,
+    triggerMessageId: params.triggerMessageId,
     confirm: async (summary) => {
       if (!channel) return false;
       return requestConfirmation(channel, params.requesterId, summary);
@@ -185,6 +189,7 @@ client.on(Events.MessageCreate, async (message) => {
       requesterId: message.author.id,
       requesterName: message.member?.displayName ?? message.author.username,
       channelId: message.channelId,
+      triggerMessageId: message.id,
       channel,
       guildName: message.guild.name,
       text,
@@ -282,12 +287,24 @@ client.once(Events.ClientReady, async (c) => {
   } catch (err) {
     console.error("Failed to register slash commands (mentions will still work):", err);
   }
+
+  // Prefix-command features (economy, games, moderation, images).
+  // Attach the router only after they have started so nothing runs against unloaded state.
+  try {
+    await startFeatures(c);
+    attachRouter(client, features);
+    const count = features.reduce((n, f) => n + (f.commands?.length ?? 0), 0);
+    console.log(`Features ready: ${features.map((f) => f.name).join(", ")} (${count} commands, prefix "${config.prefix}").`);
+  } catch (err) {
+    console.error("Failed to start features (the agent will still work):", err);
+  }
 });
 
 process.on("unhandledRejection", (err) => console.error("Unhandled rejection:", err));
 
 async function shutdown(signal: string) {
   console.log(`Received ${signal}, shutting down.`);
+  await stopFeatures();
   await client.destroy();
   process.exit(0);
 }

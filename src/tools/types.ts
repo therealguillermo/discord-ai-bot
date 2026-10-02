@@ -9,6 +9,8 @@ export interface ToolContext {
   guildId: string;
   requesterId: string;
   channelId: string;
+  /** The message that triggered this request (absent for slash commands). Used so "purge" skips it. */
+  triggerMessageId?: string;
   /** Ask the requester to approve a destructive action. Resolves false if denied/timeout. */
   confirm: (summary: string) => Promise<boolean>;
 }

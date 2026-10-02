@@ -12,12 +12,15 @@
     "start": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "import:legacy": "tsx scripts/import-legacy-economy.ts",
     "gen:endpoints": "tsx scripts/gen-endpoints.ts",
     "models": "tsx scripts/list-models.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@discordjs/rest": "^2.4.0",
+    "@napi-rs/canvas": "^1.0.10",
     "ajv": "^8.20.0",
     "discord-api-types": "^0.37.100",
     "discord.js": "^14.16.3",
@@ -27,6 +30,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.9"
   }
 }
