@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DiscordAPIError } from "@discordjs/rest";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { DiscordControlError, discordWriteAllowed } from "../auth.js";
 import { config } from "../config.js";
 import { classifyRisk } from "../safety/confirm.js";
 import { DISCORD_INTENT_ALIASES } from "./discordAliases.js";
@@ -382,6 +383,12 @@ export async function callOperation(opts: CallOptions, ctx: ToolContext): Promis
     if (value === undefined || value === null) continue;
     if (Array.isArray(value)) value.forEach((v) => query.append(p.name, String(v)));
     else query.append(p.name, String(value));
+  }
+
+  // Members can look Discord up. Only controllers may change it, including
+  // writes that are not in the destructive-confirmation set (send, create channel, …).
+  if (!discordWriteAllowed(endpoint.method, ctx.discordControl)) {
+    throw new DiscordControlError();
   }
 
   // Human confirmation for risky calls.

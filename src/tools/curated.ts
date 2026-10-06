@@ -43,6 +43,7 @@ export const sendMessage: ToolDefinition = {
     },
     required: ["channel_id", "content"],
   },
+  requiresDiscordControl: true,
   handler: async (input, ctx) => {
     const body: Record<string, unknown> = {
       content: str(input, "content"),
@@ -125,6 +126,7 @@ export const createChannel: ToolDefinition = {
     },
     required: ["name"],
   },
+  requiresDiscordControl: true,
   handler: async (input, ctx) => {
     const typeName = str(input, "type", false) ?? "text";
     const type = CHANNEL_TYPES[typeName];
@@ -211,6 +213,7 @@ export const manageRoles: ToolDefinition = {
     },
     required: ["action"],
   },
+  requiresDiscordControl: true,
   handler: async (input, ctx) => {
     const action = str(input, "action");
     const reason = str(input, "reason", false);
@@ -266,6 +269,7 @@ export const kickMember: ToolDefinition = {
     },
     required: ["user_id"],
   },
+  requiresDiscordControl: true,
   handler: async (input, ctx) => {
     await callOperation(
       {
@@ -294,6 +298,7 @@ export const timeoutMember: ToolDefinition = {
     },
     required: ["user_id", "duration_minutes"],
   },
+  requiresDiscordControl: true,
   handler: async (input, ctx) => {
     const minutes = Number(input.duration_minutes);
     if (!Number.isFinite(minutes) || minutes < 0 || minutes > MAX_TIMEOUT_MINUTES) {

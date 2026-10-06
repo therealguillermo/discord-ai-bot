@@ -1,11 +1,21 @@
-import type { ProviderPartial } from "../dossier.js";
-import { fetchText, htmlNearNumber, stripTags } from "../http.js";
+import type { PlayerDossier, ProviderPartial } from "../dossier.js";
+import { fetchText } from "../http.js";
+import {
+  applyFaceitHistory,
+  csstRejectReason,
+  csstSectionNames,
+  faceitHistoryPaths,
+  linksFromHtml,
+  parseCsstProfile,
+  type CsstProfile,
+} from "./csstParse.js";
 
-const SECTIONS = ["steam", "faceit", "leetify", "game-coordinator", "links"] as const;
+export { linksFromHtml };
 
 /**
- * CSST.at has no public API; profile pages load HTMX fragments.
- * When CSST_API_KEY is present we try a conventional JSON path first, then fragments.
+ * CSST.at has no public API the bot can rely on. Profile pages load HTMX
+ * fragments. A client that has not passed Cloudflare is either challenged or
+ * handed placeholder stats, and those placeholders are thrown away.
  */
 export async function fetchCsst(
   steamId64: string,
@@ -19,38 +29,55 @@ export async function fetchCsst(
   }
 
   try {
-    const headers = {
-      "HX-Request": "true",
-      Accept: "text/html",
-    };
+    const headers = { "HX-Request": "true", Accept: "text/html" };
     const results = await Promise.all(
-      SECTIONS.map(async (section) => {
-        const { ok, status, text } = await fetchText(`https://csst.at/${steamId64}/${section}`, {
-          headers,
-        });
+      csstSectionNames().map(async (section) => {
+        const { ok, status, text } = await fetchText(`https://csst.at/${steamId64}/${section}`, { headers });
         return { section, ok, status, text };
       }),
     );
 
-    const failed = results.filter((r) => !r.ok);
-    if (failed.length === SECTIONS.length) {
-      // Fallback: full profile page
-      const page = await fetchText(`https://csst.at/profile/${steamId64}`);
-      if (!page.ok) {
-        return {
-          provider: "csst",
-          status: "error",
-          error: `CSST failed (${failed[0]?.status ?? page.status})`,
-        };
+    const parts: Record<string, string> = {};
+    const failed: string[] = [];
+    for (const result of results) {
+      if (!result.ok) {
+        failed.push(`${result.section} (${result.status})`);
+        continue;
       }
-      return parseCombined(steamId64, page.text, { profile: page.text });
+      parts[result.section] = result.text;
     }
 
-    const parts: Record<string, string> = {};
-    for (const r of results) {
-      if (r.ok) parts[r.section] = r.text;
+    if (!Object.keys(parts).length) {
+      return {
+        provider: "csst",
+        status: "error",
+        error: `CSST failed (${failed[0] ?? "no sections"}). Stats were not read.`,
+      };
     }
-    return parseCombined(steamId64, Object.values(parts).join("\n"), parts);
+
+    if (parts.faceit) {
+      let faceitHtml = parts.faceit;
+      for (const path of faceitHistoryPaths(faceitHtml)) {
+        const game = path.match(/game_id=([a-z0-9]+)/i)?.[1];
+        const { ok, text } = await fetchText(`https://csst.at${path}`, { headers });
+        if (!ok || !game) continue;
+        faceitHtml = applyFaceitHistory(faceitHtml, game, text);
+      }
+      parts.faceit = faceitHtml;
+    }
+
+    const combined = Object.values(parts).join("\n");
+    const rejected = csstRejectReason(combined);
+    if (rejected) {
+      return {
+        provider: "csst",
+        status: "error",
+        error: `CSST did not return this player (${rejected}). Stats were not read.`,
+      };
+    }
+
+    const profile = parseCsstProfile(steamId64, parts);
+    return partialFromProfile(profile, failed);
   } catch (err) {
     return {
       provider: "csst",
@@ -58,6 +85,73 @@ export async function fetchCsst(
       error: `CSST error: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
+}
+
+function partialFromProfile(profile: CsstProfile, failed: string[]): ProviderPartial {
+  const cs2Game = profile.faceit?.games.cs2;
+  const elo = leadingNumber(cs2Game?.fields.ELO);
+  const level = leadingNumber(cs2Game?.fields.Level);
+  const premier = numericRank(profile.leetify?.ranks?.find((rank) => rank.mode === "Premier")?.rank);
+  const hours = hoursOf(profile.steam?.fields["CS2 Playtime"]);
+  const trust = leadingNumber(profile.cstracker?.trust);
+
+  return {
+    provider: "csst",
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    identity: {
+      personaName: profile.steam?.name,
+      avatarUrl: profile.steam?.avatarUrl,
+      profileUrl: profile.steam?.url,
+      country: profile.steam?.fields.Country,
+    },
+    cs2: {
+      hours,
+      premierRating: premier,
+      gc: defined({
+        medals: profile.medals,
+        xpLevel: profile.steam?.fields["XP level"],
+        commendations: profile.steam?.fields.Commendations,
+        steamLevel: profile.steam?.level,
+      }),
+    },
+    faceit: {
+      level,
+      elo,
+      nickname: faceitNickname(profile.faceit?.url) ?? profile.faceit?.name,
+      url: profile.faceit?.url,
+      stats: profile.faceit
+        ? {
+            registered: profile.faceit.fields.Registered,
+            country: profile.faceit.fields.Country,
+            csgo: profile.faceit.games.csgo?.fields,
+            cs2: cs2Game?.fields,
+            notes: { ...profile.faceit.notes, ...cs2Game?.notes },
+          }
+        : undefined,
+    },
+    leetify: {
+      rating: leadingNumber(profile.leetify?.fields.Rating),
+      url: profile.leetify?.url,
+      ranks: profile.leetify
+        ? {
+            name: profile.leetify.name,
+            fields: profile.leetify.fields,
+            notes: profile.leetify.notes,
+            rows: profile.leetify.ranks,
+          }
+        : undefined,
+    },
+    trust: trust !== undefined ? { score: trust } : undefined,
+    links: {
+      csst: profile.url,
+      ...profile.links,
+    },
+    raw: {
+      profile,
+      ...(failed.length ? { sectionErrors: failed } : {}),
+    },
+  };
 }
 
 async function tryOfficialApi(steamId64: string, apiKey: string): Promise<ProviderPartial | null> {
@@ -82,64 +176,37 @@ async function tryOfficialApi(steamId64: string, apiKey: string): Promise<Provid
   }
 }
 
-function parseCombined(
-  steamId64: string,
-  combined: string,
-  parts: Record<string, string>,
-): ProviderPartial {
-  const faceitHtml = parts.faceit ?? combined;
-  const leetifyHtml = parts.leetify ?? combined;
-  const steamHtml = parts.steam ?? combined;
-  const gcHtml = parts["game-coordinator"] ?? "";
-
-  const faceitLevel = htmlNearNumber(faceitHtml, /level|skill\s*level/i);
-  const faceitElo = htmlNearNumber(faceitHtml, /elo|rating/i);
-  const leetifyRating = htmlNearNumber(leetifyHtml, /leetify|rating/i);
-  const hours = htmlNearNumber(steamHtml, /hours?|playtime/i);
-  const premier = htmlNearNumber(combined, /premier/i);
-
-  const nicknameMatch = faceitHtml.match(/faceit\.com\/(?:players|en\/players)\/([A-Za-z0-9_-]+)/i);
-  const leetifyUrl = combined.match(/https?:\/\/[^\s"'<>]*leetify[^\s"'<>]*/i)?.[0];
-
-  return {
-    provider: "csst",
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    identity: {
-      personaName: guessName(steamHtml) ?? guessName(combined),
-    },
-    cs2: {
-      hours,
-      premierRating: premier,
-      gc: gcHtml ? { text: stripTags(gcHtml).slice(0, 1500) } : undefined,
-    },
-    faceit: {
-      level: faceitLevel,
-      elo: faceitElo,
-      nickname: nicknameMatch?.[1],
-      url: nicknameMatch?.[1] ? `https://www.faceit.com/en/players/${nicknameMatch[1]}` : undefined,
-      stats: parts.faceit ? { text: stripTags(parts.faceit).slice(0, 1500) } : undefined,
-    },
-    leetify: {
-      rating: leetifyRating,
-      url: leetifyUrl,
-      ranks: parts.leetify ? { text: stripTags(parts.leetify).slice(0, 1500) } : undefined,
-    },
-    links: {
-      csst: `https://csst.at/profile/${steamId64}`,
-      leetify: leetifyUrl,
-      faceit: nicknameMatch?.[1] ? `https://www.faceit.com/en/players/${nicknameMatch[1]}` : undefined,
-    },
-    raw: {
-      sections: Object.fromEntries(
-        Object.entries(parts).map(([k, v]) => [k, stripTags(v).slice(0, 2000)]),
-      ),
-    },
-  };
+function leadingNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const match = value.replace(/,/g, "").match(/[+-]?\d+(?:\.\d+)?/);
+  if (!match) return undefined;
+  const n = Number(match[0]);
+  return Number.isFinite(n) ? n : undefined;
 }
 
-function guessName(html: string): string | undefined {
-  const t = stripTags(html);
-  const m = t.match(/^([A-Za-z0-9 _.\-]{2,32})/);
-  return m?.[1]?.trim();
+function faceitNickname(url: string | undefined): string | undefined {
+  return url?.match(/faceit\.com\/(?:[a-z]{2}\/)?players\/([^/?#]+)/i)?.[1];
+}
+
+function hoursOf(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const total = value.match(/total:\s*([\d,.]+)\s*h/i)?.[1] ?? value.match(/([\d,.]+)\s*h/i)?.[1];
+  if (!total) return undefined;
+  const n = Number(total.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function defined(obj: Record<string, unknown>): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined || value === null || value === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    out[key] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function numericRank(value: string | undefined): number | undefined {
+  if (!value || value.trim() === "?") return undefined;
+  return leadingNumber(value);
 }

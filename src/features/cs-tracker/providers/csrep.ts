@@ -1,61 +1,91 @@
 import type { ProviderPartial } from "../dossier.js";
 import { fetchJson } from "../http.js";
 
+const API = "https://csrep.gg/api";
+
+export type CsrepMatchSource = "csrep" | "faceit" | "gamersclub";
+
 export type CsrepClient = {
   getPlayer: (steamId64: string) => Promise<ProviderPartial>;
   getPlayers: (steamIds: string[]) => Promise<ProviderPartial[]>;
   search: (query: string) => Promise<{ steamId64: string; name?: string }[]>;
   refresh: (steamId64: string) => Promise<{ ok: boolean; status: number; data: unknown }>;
+  getMatch: (source: CsrepMatchSource, id: string) => Promise<unknown>;
+  importShareCode: (shareCode: string) => Promise<unknown>;
+  importFaceit: (params: { url?: string; matchId?: string }) => Promise<unknown>;
 };
+
+/** `{ status, result }` envelope from the CSRep API. A bare payload is returned as-is. */
+export function csrepResult<T>(payload: unknown): { ok: true; result: T } | { ok: false; error: string } {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const record = payload as Record<string, unknown>;
+    if (record.status === "ERROR") {
+      const message = record.message ?? record.error ?? record.detail;
+      return { ok: false, error: typeof message === "string" && message.trim() ? message.trim() : "CSRep returned ERROR" };
+    }
+    if ("result" in record) return { ok: true, result: record.result as T };
+  }
+  return { ok: true, result: payload as T };
+}
+
+export function csrepMatchPath(source: CsrepMatchSource, id: string): string {
+  const encoded = encodeURIComponent(id);
+  if (source === "faceit") return `/matches/faceit/${encoded}`;
+  if (source === "gamersclub") return `/matches/gamersclub/${encoded}`;
+  return `/matches/${encoded}`;
+}
 
 export function createCsrepClient(apiKey: string | undefined): CsrepClient | null {
   if (!apiKey) return null;
-  const headers = { "x-api-key": apiKey, Accept: "application/json" };
+  const headers = { "X-API-Key": apiKey, Accept: "application/json" };
+
+  async function call<T>(
+    path: string,
+    opts: { method?: string; body?: string } = {},
+  ): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
+    const res = await fetchJson<unknown>(`${API}${path}`, { headers, ...opts });
+    const parsed = csrepResult<T>(res.data);
+    if (!res.ok || !parsed.ok) {
+      const detail = !parsed.ok ? parsed.error : res.text.slice(0, 200);
+      return { ok: false, error: `CSRep ${res.status}${detail ? `: ${detail}` : ""}` };
+    }
+    return parsed;
+  }
 
   async function getPlayer(steamId64: string): Promise<ProviderPartial> {
-    const { ok, status, data, text } = await fetchJson<Record<string, unknown>>(
-      `https://csrep.gg/api/players/${steamId64}`,
-      { headers },
-    );
-    if (!ok || !data) {
+    const got = await call<Record<string, unknown>>(`/players/${encodeURIComponent(steamId64)}`);
+    if (!got.ok || !got.result || typeof got.result !== "object" || Array.isArray(got.result)) {
       return {
         provider: "csrep",
         status: "error",
-        error: `CSRep player ${steamId64} failed (${status}): ${text.slice(0, 200)}`,
+        error: got.ok ? `CSRep player ${steamId64} returned an empty result` : got.error,
+        raw: { steamId64 },
       };
     }
-    return mapPlayer(data);
+    return mapCsrepPlayer(got.result);
   }
 
   async function getPlayers(steamIds: string[]): Promise<ProviderPartial[]> {
     if (steamIds.length === 0) return [];
     if (steamIds.length === 1) return [await getPlayer(steamIds[0]!)];
-    const url = `https://csrep.gg/api/players?ids=${steamIds.map(encodeURIComponent).join(",")}`;
-    const { ok, status, data, text } = await fetchJson<unknown>(url, { headers });
-    if (!ok || data == null) {
+    const got = await call<unknown>(`/players?ids=${steamIds.map(encodeURIComponent).join(",")}`);
+    if (!got.ok) {
       return steamIds.map((id) => ({
         provider: "csrep" as const,
         status: "error" as const,
-        error: `CSRep batch failed (${status}): ${text.slice(0, 200)}`,
+        error: got.error,
         raw: { steamId64: id },
       }));
     }
-    const list = Array.isArray(data) ? data : (data as { players?: unknown[] }).players;
-    if (!Array.isArray(list)) {
-      // Fall back to sequential
-      return Promise.all(steamIds.map((id) => getPlayer(id)));
-    }
-    return list.map((p) => mapPlayer(p as Record<string, unknown>));
+    const list = playerList(got.result);
+    if (!list) return Promise.all(steamIds.map((id) => getPlayer(id)));
+    return list.map((p) => mapCsrepPlayer(p));
   }
 
   async function search(query: string): Promise<{ steamId64: string; name?: string }[]> {
-    const url = `https://csrep.gg/api/players/search?query=${encodeURIComponent(query)}`;
-    const { ok, data } = await fetchJson<unknown>(url, { headers });
-    if (!ok || data == null) return [];
-    const list = Array.isArray(data) ? data : (data as { results?: unknown[]; players?: unknown[] }).results
-      ?? (data as { players?: unknown[] }).players
-      ?? [];
-    if (!Array.isArray(list)) return [];
+    const got = await call<unknown>(`/players/search?query=${encodeURIComponent(query)}`);
+    if (!got.ok || got.result == null) return [];
+    const list = playerList(got.result) ?? [];
     const out: { steamId64: string; name?: string }[] = [];
     for (const item of list) {
       const o = item as Record<string, unknown>;
@@ -73,61 +103,141 @@ export function createCsrepClient(apiKey: string | undefined): CsrepClient | nul
   }
 
   async function refresh(steamId64: string) {
-    return fetchJson(`https://csrep.gg/api/players/${steamId64}/refresh`, {
+    return fetchJson(`${API}/players/${encodeURIComponent(steamId64)}/refresh`, {
       headers,
       method: "POST",
     });
   }
 
-  return { getPlayer, getPlayers, search, refresh };
+  async function getMatch(source: CsrepMatchSource, id: string): Promise<unknown> {
+    const got = await call<unknown>(csrepMatchPath(source, id));
+    if (!got.ok) throw new Error(got.error);
+    return got.result;
+  }
+
+  async function importShareCode(shareCode: string): Promise<unknown> {
+    const got = await call<unknown>("/matches/import", {
+      method: "POST",
+      body: JSON.stringify({ share_code: shareCode }),
+    });
+    if (!got.ok) throw new Error(got.error);
+    return got.result;
+  }
+
+  async function importFaceit(params: { url?: string; matchId?: string }): Promise<unknown> {
+    const body: Record<string, string> = {};
+    if (params.url) body.url = params.url;
+    if (params.matchId) body.match_id = params.matchId;
+    const got = await call<unknown>("/matches/import/faceit", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (!got.ok) throw new Error(got.error);
+    return got.result;
+  }
+
+  return { getPlayer, getPlayers, search, refresh, getMatch, importShareCode, importFaceit };
 }
 
-function mapPlayer(data: Record<string, unknown>): ProviderPartial {
-  const steamId = String(data.steamId ?? data.steamid ?? data.steam_id ?? "");
+function playerList(data: unknown): Record<string, unknown>[] | null {
+  if (Array.isArray(data)) return data.filter(isRecord);
+  const obj = asObj(data);
+  if (!obj) return null;
+  if (Array.isArray(obj.players)) return obj.players.filter(isRecord);
+  if (Array.isArray(obj.results)) return obj.results.filter(isRecord);
+  return null;
+}
+
+export function mapCsrepPlayer(data: Record<string, unknown>): ProviderPartial {
+  const steamId = String(data.id ?? data.steamId ?? data.steamid ?? data.steam_id ?? "");
   const faceit = asObj(data.faceit ?? data.faceIt);
   const trust = asObj(data.trust ?? data.reputation ?? data.trustRating);
-  const bans = asObj(data.bans ?? data.ban);
-  const premier = num(data.premierRating ?? data.premier ?? data.cs2Premier ?? asObj(data.cs2)?.premier);
+  const faceitUrl = str(data.faceit_url ?? faceit?.url ?? faceit?.profile);
+  const premier = num(data.premierRating ?? data.premier ?? data.cs2Premier ?? asObj(data.cs2)?.premier)
+    ?? rankCurrent(data.ranks, /premier/i);
 
   return {
     provider: "csrep",
     status: "ok",
-    timestamp: str(data.updatedAt ?? data.refreshedAt ?? data.lastRefresh) ?? new Date().toISOString(),
+    timestamp: str(data.refreshed_at ?? data.updated_at ?? data.updatedAt ?? data.refreshedAt ?? data.lastRefresh)
+      ?? new Date().toISOString(),
     identity: {
       personaName: str(data.name ?? data.personaName ?? data.username ?? data.personaname),
       avatarUrl: str(data.avatar ?? data.avatarUrl ?? data.avatarfull),
-      profileUrl: steamId ? `https://steamcommunity.com/profiles/${steamId}` : undefined,
+      profileUrl: /^7656119\d{10}$/.test(steamId) ? `https://steamcommunity.com/profiles/${steamId}` : undefined,
       country: str(data.country ?? data.loccountrycode),
     },
     cs2: {
-      hours: num(data.cs2Hours ?? data.hours ?? asObj(data.cs2)?.hours),
+      hours: num(data.cs2_hours ?? data.cs2Hours ?? data.hours ?? asObj(data.cs2)?.hours),
       premierRating: premier,
       wins: num(data.wins ?? asObj(data.cs2)?.wins),
     },
     faceit: {
-      level: num(faceit?.level ?? faceit?.skill_level ?? data.faceitLevel),
+      level: num(faceit?.level ?? faceit?.skill_level ?? data.faceitLevel) ?? rankCurrent(data.ranks, /faceit/i),
       elo: num(faceit?.elo ?? faceit?.faceit_elo ?? data.faceitElo),
-      nickname: str(faceit?.nickname ?? faceit?.username),
-      url: str(faceit?.url ?? faceit?.profile),
+      nickname: str(faceit?.nickname ?? faceit?.username) ?? faceitNickname(faceitUrl),
+      url: faceitUrl,
     },
     trust: {
-      score: num(trust?.score ?? trust?.rating ?? data.trustScore ?? data.trust_rating),
-      flags: arrStr(trust?.flags ?? data.flags),
-      notes: str(trust?.notes ?? trust?.summary),
+      score: num(trust?.trust_score ?? trust?.score ?? trust?.rating ?? data.trustScore ?? data.trust_rating),
+      flags: arrStr(trust?.flags ?? data.flags) ?? autoflagNote(data.autoflag),
+      notes: data.redacted === true ? "Profile is redacted on CSRep." : str(trust?.notes ?? trust?.summary),
     },
-    bans: {
-      vac: bool(bans?.vac ?? bans?.VACBanned ?? data.vacBanned),
-      gameBan: bool(bans?.gameBan ?? bans?.NumberOfGameBans ?? data.gameBan),
-      community: bool(bans?.community ?? data.communityBanned),
-      numberOfBans: num(bans?.numberOfBans ?? bans?.NumberOfVACBans),
-      daysSinceLastBan: num(bans?.daysSinceLastBan ?? bans?.DaysSinceLastBan),
-    },
+    bans: mapBans(data),
     links: {
-      csrep: steamId ? `https://csrep.gg/player/${steamId}` : undefined,
-      faceit: str(faceit?.url),
+      csrep: /^7656119\d{10}$/.test(steamId) ? `https://csrep.gg/player/${steamId}` : undefined,
+      faceit: faceitUrl,
     },
     raw: data,
   };
+}
+
+function mapBans(data: Record<string, unknown>): ProviderPartial["bans"] {
+  if (Array.isArray(data.bans)) {
+    const types = data.bans
+      .map((ban) => str(asObj(ban)?.type)?.toUpperCase())
+      .filter((t): t is string => Boolean(t));
+    return {
+      vac: types.includes("VAC"),
+      gameBan: types.includes("GAME"),
+      community: types.includes("COMMUNITY"),
+      numberOfBans: data.bans.length,
+    };
+  }
+  const bans = asObj(data.bans ?? data.ban);
+  return {
+    vac: bool(bans?.vac ?? bans?.VACBanned ?? data.vacBanned),
+    gameBan: bool(bans?.gameBan ?? bans?.NumberOfGameBans ?? data.gameBan),
+    community: bool(bans?.community ?? data.communityBanned),
+    numberOfBans: num(bans?.numberOfBans ?? bans?.NumberOfVACBans),
+    daysSinceLastBan: num(bans?.daysSinceLastBan ?? bans?.DaysSinceLastBan),
+  };
+}
+
+function rankCurrent(ranks: unknown, key: RegExp): number | undefined {
+  const obj = asObj(ranks);
+  if (!obj) return undefined;
+  for (const [name, value] of Object.entries(obj)) {
+    if (!key.test(name)) continue;
+    const row = asObj(value);
+    return num(row?.current ?? value);
+  }
+  return undefined;
+}
+
+function faceitNickname(url: string | undefined): string | undefined {
+  const match = url?.match(/faceit\.com\/(?:[a-z]{2}\/)?players\/([A-Za-z0-9_-]+)/i);
+  return match?.[1];
+}
+
+function autoflagNote(autoflag: unknown): string[] | undefined {
+  const row = asObj(autoflag);
+  if (!row?.id) return undefined;
+  return ["autoflag"];
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 function asObj(v: unknown): Record<string, unknown> | undefined {

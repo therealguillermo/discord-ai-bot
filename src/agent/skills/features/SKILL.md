@@ -128,6 +128,7 @@ purge_messages({
 ```
 
 **rules:**
+- Requires `discord control: yes` in the request header. If it says no, refuse and do not call the tool.
 - Needs Manage Messages for the bot. Asks for human confirmation.
 - Leaves the triggering request message alone.
 - Messages older than 14 days cannot be bulk-deleted and may be skipped.
@@ -149,6 +150,7 @@ start_vote_timeout({
 ```
 
 **rules:**
+- Requires `discord control: yes` in the request header. If it says no, refuse and do not call the tool.
 - Posts Yes/No buttons. Needs enough yes votes (server config, default 3) and more yes than no.
 - Only when the requester asks to **start a vote**.
 - For an **immediate** timeout/mute, use `timeout_member` (see `discord-api` skill topic `mute`) — not this tool.
@@ -172,13 +174,15 @@ Music has its own skill. Load `load_skill name="music" topic="play"` (or skip/qu
 
 **keywords:** cs, cs2, steam, faceit, leetify, premier, trust, vac, csrep, csst, cstracker, link steam, my rank
 
-**prefer tools:** `cs_player`, `cs_link_steam`, `cs_list_links`, `cs_compare`, `cs_leaderboard`
+**prefer tools:** `cs_player`, `cs_link_steam`, `cs_list_links`, `cs_compare`, `cs_match`, `cs_leaderboard`
 
 ```
 cs_link_steam({ steam: "<SteamID64|profile URL|vanity>", label?: "main", primary?: true })
 cs_list_links({ user_id?: "<snowflake>" })
 cs_player({ steam?: "...", user_id?: "<snowflake>", all?: false, refresh?: false })
 cs_compare({ targets: [{ user_id: "..." }, { steam: "..." }] })
+cs_match({ id: "<match id>", source?: "csrep" | "faceit" | "gamersclub" })
+cs_import_match({ share_code?: "CSGO-.....", faceit_url?: "...", faceit_match_id?: "..." })
 cs_leaderboard({ limit?: 15 })
 cs_search({ query: "<name>" })   // needs CSREP_API_KEY
 cs_refresh({ steam?: "...", user_id?: "..." })
@@ -189,6 +193,9 @@ cs_set_primary({ steam: "<id|label>" })
 **rules:**
 - One Discord user can link **many** Steam accounts. Steam IDs are unique guild-wide.
 - Tools fetch and merge CSRep + CSST + CSTracker (+ Faceit/Steam when keyed). You **format** the reply from the dossier — never invent ranks, bans, or trust scores.
+- When `sources.csst` is `ok`, `dossier.raw.csst.profile` is the categorized csst.at page (steam, faceit csgo/cs2, leetify, scope, cstracker, csstats, inventory, medals). Use those labeled fields. If `sources.csst` is `error`, say it was blocked or was placeholder data, and do not fill CSST numbers from anywhere else.
+- `cs_match` and `cs_import_match` need `CSREP_API_KEY`. Import takes a Valve share code **or** a FACEIT url/match id, not a demo upload.
+- Comparing several players uses CSRep's batch player route. Format match replies from `map`, `score`, and `players` only.
 - If `sources` shows errors/skipped or `errors` is present, say what was missing.
 - For "what's my CS / faceit?", call `cs_player` with no args (uses requester's primary link). If unlink/no link, tell them to send a Steam profile URL and call `cs_link_steam`.
 - Resolve Discord names with `find_members` before `user_id`.

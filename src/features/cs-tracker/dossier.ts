@@ -46,6 +46,8 @@ export interface PlayerDossier {
     faceit?: string;
     steam?: string;
     leetify?: string;
+    csstats?: string;
+    scope?: string;
   };
   freshness: {
     fetchedAt: string;

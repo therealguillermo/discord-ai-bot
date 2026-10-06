@@ -36,6 +36,7 @@ const purgeTool: ToolDefinition = {
     },
     required: ["count"],
   },
+  requiresDiscordControl: true,
   destructive: true,
   describeAction: (input) =>
     `Delete the last ${Number(input.count) || "?"} message(s) in ${input.channel_id ? `<#${String(input.channel_id)}>` : "this channel"}`,
@@ -231,6 +232,7 @@ const voteTimeoutTool: ToolDefinition = {
     },
     required: ["user_id"],
   },
+  requiresDiscordControl: true,
   handler: async (input, ctx) => {
     const userId = String(input.user_id ?? "");
     if (!/^\d{15,25}$/.test(userId)) throw new Error("user_id must be a Discord user ID.");

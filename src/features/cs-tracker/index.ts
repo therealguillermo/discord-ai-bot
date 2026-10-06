@@ -151,7 +151,7 @@ const playerTool: ToolDefinition = {
     "Fetch a merged CS player dossier from CSRep + CSST + CSTracker (+ optional Faceit/Steam APIs). " +
     "Pass steam (ID/URL) and/or Discord user_id (uses their primary link). " +
     "Omit both to use the requester's primary link. Set all=true to fetch every linked account. " +
-    "Returns organized sections — format the Discord reply from this data; never invent stats.",
+    "Returns organized sections. When CSST responded, dossier.raw.csst.profile holds the labeled cards (steam, faceit, leetify, scope, cstracker, csstats, inventory). Format the Discord reply from this data; never invent stats.",
   input_schema: {
     type: "object",
     properties: {
@@ -181,9 +181,7 @@ const playerTool: ToolDefinition = {
       await Promise.allSettled(ids.map((id) => aggregator.csrep!.refresh(id)));
     }
 
-    const dossiers = await Promise.all(
-      ids.map((id) => aggregator.fetchDossier(id, { bypassCache: bypass })),
-    );
+    const dossiers = await aggregator.fetchDossiers(ids, { bypassCache: bypass });
     return dossiers.length === 1 ? { dossier: dossiers[0] } : { dossiers };
   },
 };
@@ -234,13 +232,12 @@ const compareTool: ToolDefinition = {
       }
     }
 
-    const dossiers = await Promise.all(
-      resolved.map(async (r) => ({
-        label: r.label,
-        steamId64: r.steamId64,
-        dossier: await aggregator.fetchDossier(r.steamId64),
-      })),
-    );
+    const fetched = await aggregator.fetchDossiers(resolved.map((r) => r.steamId64));
+    const dossiers = resolved.map((r, i) => ({
+      label: r.label,
+      steamId64: r.steamId64,
+      dossier: fetched[i]!,
+    }));
 
     const comparison = dossiers.map((d) => ({
       label: d.label,
@@ -310,6 +307,66 @@ const refreshTool: ToolDefinition = {
   },
 };
 
+const matchTool: ToolDefinition = {
+  name: "cs_match",
+  description:
+    "Look up one CSRep match by CSRep id, FACEIT match id, or Gamers Club id. Requires CSREP_API_KEY. " +
+    "Format the reply from the returned match (map, score, players). Never invent stats.",
+  input_schema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Match id for the chosen source." },
+      source: {
+        type: "string",
+        enum: ["csrep", "faceit", "gamersclub"],
+        description: "Where the id comes from. Default: csrep.",
+      },
+    },
+    required: ["id"],
+  },
+  handler: async (input) => {
+    if (!aggregator.csrep) throw new UserError("CSRep match lookup needs CSREP_API_KEY in the bot environment.");
+    const id = String(input.id ?? "").trim();
+    if (!id) throw new UserError("id is required.");
+    const sourceRaw = String(input.source ?? "csrep").trim().toLowerCase();
+    if (sourceRaw !== "csrep" && sourceRaw !== "faceit" && sourceRaw !== "gamersclub") {
+      throw new UserError("source must be csrep, faceit, or gamersclub.");
+    }
+    const match = await aggregator.csrep.getMatch(sourceRaw, id);
+    return { source: sourceRaw, id, match };
+  },
+};
+
+const importMatchTool: ToolDefinition = {
+  name: "cs_import_match",
+  description:
+    "Ask CSRep to import a Valve share code (CSGO-.....) or a FACEIT match (url and/or match id). " +
+    "Requires CSREP_API_KEY. Does not upload demo files. Pass either share_code, or faceit_url / faceit_match_id.",
+  input_schema: {
+    type: "object",
+    properties: {
+      share_code: { type: "string", description: "Valve match share code." },
+      faceit_url: { type: "string", description: "Signed FACEIT demo URL." },
+      faceit_match_id: { type: "string", description: "FACEIT match id." },
+    },
+  },
+  handler: async (input) => {
+    if (!aggregator.csrep) throw new UserError("CSRep match import needs CSREP_API_KEY in the bot environment.");
+    const share = input.share_code != null ? String(input.share_code).trim() : "";
+    const faceitUrl = input.faceit_url != null ? String(input.faceit_url).trim() : "";
+    const faceitMatchId = input.faceit_match_id != null ? String(input.faceit_match_id).trim() : "";
+    const hasShare = Boolean(share);
+    const hasFaceit = Boolean(faceitUrl || faceitMatchId);
+    if (hasShare === hasFaceit) {
+      throw new UserError("Pass a share_code, or a FACEIT url/match id — not both, and not neither.");
+    }
+    const match = hasShare
+      ? await aggregator.csrep.importShareCode(share)
+      : await aggregator.csrep.importFaceit({ url: faceitUrl || undefined, matchId: faceitMatchId || undefined });
+    return { imported: true, match };
+  },
+};
+
 const leaderboardTool: ToolDefinition = {
   name: "cs_leaderboard",
   description:
@@ -343,6 +400,8 @@ export const csTrackerFeature: Feature = {
     compareTool,
     searchTool,
     refreshTool,
+    matchTool,
+    importMatchTool,
     leaderboardTool,
   ],
   start: async () => {

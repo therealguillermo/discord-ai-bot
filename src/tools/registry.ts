@@ -1,4 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { DiscordControlError } from "../auth.js";
 import { featureTools } from "../features/index.js";
 import { audit } from "../safety/confirm.js";
 import { curatedTools } from "./curated.js";
@@ -47,6 +48,9 @@ export async function runTool(
   }
 
   try {
+    if (tool.requiresDiscordControl && !ctx.discordControl) {
+      throw new DiscordControlError();
+    }
     if (tool.destructive) {
       const summary = tool.describeAction?.(input) ?? `${tool.name} ${JSON.stringify(input)}`;
       const approved = await ctx.confirm(summary);
@@ -70,7 +74,12 @@ export async function runTool(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const declined = message.includes("declined or did not respond");
-    await audit({ ...base, outcome: declined ? "cancelled" : "error", detail: message });
+    const denied = err instanceof DiscordControlError;
+    await audit({
+      ...base,
+      outcome: denied ? "denied" : declined ? "cancelled" : "error",
+      detail: message,
+    });
     return { type: "tool_result", tool_use_id: toolUse.id, is_error: true, content: message };
   }
 }

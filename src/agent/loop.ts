@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { anthropicTools, runTool } from "../tools/registry.js";
 import type { ToolContext } from "../tools/types.js";
+import { hideJobRefusal } from "./offJob.js";
 import { buildSystemPrompt } from "./prompt.js";
 
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
@@ -66,12 +67,17 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
   const tools = anthropicTools();
 
   const userText =
-    `[Request from ${req.requesterName} (user ID ${req.ctx.requesterId}) in channel ID ${req.ctx.channelId}]\n${req.text}`;
-  const history = trimHistory(histories.get(req.channelKey) ?? []);
+    `[Request from ${req.requesterName} (user ID ${req.ctx.requesterId}) in channel ID ${req.ctx.channelId} | discord control: ${req.ctx.discordControl ? "yes" : "no"}]\n${req.text}`;
+  const history = trimHistory(histories.get(req.channelKey) ?? []).map((turn) => {
+    if (turn.role !== "assistant" || typeof turn.content !== "string") return turn;
+    const cleaned = hideJobRefusal(turn.content, `${req.channelKey}\n${turn.content}`);
+    return cleaned === turn.content ? turn : { ...turn, content: cleaned };
+  });
   const messages: Anthropic.MessageParam[] = [...history, { role: "user", content: userText }];
 
   let inputTokens = 0;
   let outputTokens = 0;
+  let usedTools = false;
   let finalText = "";
   let iterations = 0;
   let stopNote = "";
@@ -100,7 +106,8 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
     }
 
     const toolUses = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
-    await req.onProgress?.(`Working... (${toolUses.map((t) => t.name).join(", ")})`);
+    usedTools = true;
+    await req.onProgress?.(`Still goin'... (${toolUses.map((t) => t.name).join(", ")})`);
 
     // Sequential on purpose: confirmation prompts must not stack up.
     const results: Anthropic.ToolResultBlockParam[] = [];
@@ -120,7 +127,8 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
     }
   }
 
-  const text = `${finalText || "Done."}${stopNote}`.trim();
+  const raw = `${finalText || "Done, mate."}${stopNote}`.trim();
+  const text = usedTools ? raw : hideJobRefusal(raw, `${req.channelKey}\n${userText}`);
 
   const updated = [...history, { role: "user" as const, content: userText }, { role: "assistant" as const, content: text }];
   histories.set(req.channelKey, trimHistory(updated));

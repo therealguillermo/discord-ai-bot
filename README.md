@@ -1,7 +1,9 @@
 # Discord bot controlled by a Claude agent
 
-A discord.js bot that hands requests from your server's admins to a Claude tool-use loop. The agent can reach
-the whole Discord REST API (about 240 operations) through tools.
+A discord.js bot that hands requests from anyone in your server to a Claude tool-use loop. Music, games, and
+the other features are open to every member. Changing Discord (moderation, channels, roles, and similar) stays
+limited to the owner and allowed admins. The agent can reach the whole Discord REST API (about 240 operations)
+through tools, and non-admin writes are rejected in code.
 
 ```mermaid
 flowchart LR
@@ -82,7 +84,7 @@ Everything is an agent tool: mention the bot or use `/agent`. For example `@Bot 
 | Moderation | `purge_messages`, `start_vote_timeout` | Purge needs Manage Messages and asks for confirmation. Vote timeout needs `VOTE_TIMEOUT_MIN_VOTES` yes votes. For an immediate timeout use `timeout_member`. |
 | Images | `generate_image` | Needs `OPENAI_API_KEY` (the tool tells you if it's missing). 30s cooldown per user. |
 | Music | `music_join`, `music_play`, `music_add`, `music_skip`, `music_stop`, `music_clear`, `music_queue`, `music_move`, `music_remove`, `music_pause`, `music_resume`, `music_leave` | Agent-controlled voice queue. Requires `yt-dlp` and `ffmpeg` on PATH (or `YTDLP_PATH` / `FFMPEG_PATH`). Requester must be in a voice channel. Load skill `music` for intent mapping. |
-| CS Tracker | `cs_link_steam`, `cs_unlink_steam`, `cs_list_links`, `cs_set_primary`, `cs_player`, `cs_compare`, `cs_search`, `cs_refresh`, `cs_leaderboard` | Discord user → many Steam accounts (`data/cs-links.json`). `cs_player` merges CSRep + CSST + CSTracker (optional Faceit/Steam Web API). Set `CSREP_API_KEY` / `FACEIT_API_KEY` / `STEAM_WEB_API_KEY` as available. Agent formats replies from the dossier — does not invent stats. |
+| CS Tracker | `cs_link_steam`, `cs_unlink_steam`, `cs_list_links`, `cs_set_primary`, `cs_player`, `cs_compare`, `cs_search`, `cs_refresh`, `cs_match`, `cs_import_match`, `cs_leaderboard` | Discord user → many Steam accounts (`data/cs-links.json`). `cs_player` merges CSRep + CSST + CSTracker (optional Faceit/Steam Web API). `cs_match` / `cs_import_match` use the CSRep match API (share code or FACEIT id; no demo uploads). Set `CSREP_API_KEY` / `FACEIT_API_KEY` / `STEAM_WEB_API_KEY` as available. Agent formats replies from the tool result — does not invent stats. |
 
 Minecraft control was removed from the old GearmyBot port. Old GearmyBot mapping: `?saveEconState` is gone (saving is automatic);
 `?econStatus` / `?leaderboard` → ask the agent for the leaderboard; `?chat` → mention the bot;
@@ -149,8 +151,12 @@ An LLM holding moderator permissions needs guardrails:
   - *Which server:* only `DISCORD_GUILD_ID`. Requests from any other server are ignored, and API calls are pinned to it.
   - *Which channels:* `ALLOWED_CHANNEL_IDS` (comma-separated). Empty means any channel in the server. Threads inherit
     from their parent channel. In a channel that is not on the list the bot stays silent.
-  - *Who:* `OWNER_USER_ID` (always allowed), plus anyone in `ALLOWED_USER_IDS` or holding a role in `ALLOWED_ROLE_IDS`.
-    Everyone else gets a "not authorized" reply.
+  - *Who can use it:* every member of that server. Mentions and `/agent` work for anyone in an allowed channel.
+  - *Who can change Discord:* `OWNER_USER_ID`, plus anyone in `ALLOWED_USER_IDS` or holding a role in
+    `ALLOWED_ROLE_IDS`. Everyone else can use music, games, economy, images, and CS lookups, and can ask the bot
+    to read messages or look up channels, roles, and members. They cannot moderate or change the server
+    (channels, roles, permissions, kicks, bans, timeouts, purges, vote timeouts, or sending and deleting messages).
+    That block is enforced in code, not only in the prompt.
 - **Confirmation buttons:** deletes, bans, kicks, bulk deletes, and role, permission, member, and server-setting
   changes post a Confirm/Cancel message. Only the requester can answer, and it times out after 60 seconds.
   Classification lives in `classifyRisk` in `src/safety/confirm.ts`.

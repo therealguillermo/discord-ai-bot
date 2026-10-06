@@ -9,13 +9,14 @@ description: >-
 
 ## How to use this skill
 
-1. Resolve people/channels/roles to IDs with `find_members`, `list_channels`, or `list_roles` first.
-2. Prefer a **curated tool** when this skill says so — simpler schema, same safety checks.
-3. Otherwise call `discord_call` with the listed `operation_id`, `params`, and `body`.
-4. If the topic is missing here, use `discord_search_endpoints` then `discord_call`.
-5. Destructive ops (kick, ban, delete, role/permission changes, timeouts) auto-confirm with the requester — just call the tool.
-6. `guild_id` and `application_id` are filled automatically. Never invent them.
-7. Blocked forever: `leave_guild`, `create_dm`, group-DM membership changes.
+1. If the request header says `discord control: no`, stop. Do not call any tool from this skill. Tell them you can't change the server.
+2. Resolve people/channels/roles to IDs with `find_members`, `list_channels`, or `list_roles` first.
+3. Prefer a **curated tool** when this skill says so — simpler schema, same safety checks.
+4. Otherwise call `discord_call` with the listed `operation_id`, `params`, and `body`.
+5. If the topic is missing here, use `discord_search_endpoints` then `discord_call`.
+6. Destructive ops (kick, ban, delete, role/permission changes, timeouts) auto-confirm with the requester — just call the tool.
+7. `guild_id` and `application_id` are filled automatically. Never invent them.
+8. Blocked forever: `leave_guild`, `create_dm`, group-DM membership changes.
 
 ---
 

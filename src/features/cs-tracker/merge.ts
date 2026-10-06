@@ -87,6 +87,6 @@ function assignObj(
 
 function trimRaw(raw: unknown): unknown {
   const s = JSON.stringify(raw);
-  if (s.length <= 8000) return raw;
+  if (s.length <= 32_000) return raw;
   return { _truncated: true, preview: s.slice(0, 8000) };
 }

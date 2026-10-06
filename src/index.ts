@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { runAgent, clearHistory } from "./agent/loop.js";
-import { isAuthorized, isChannelAllowed } from "./auth.js";
+import { canControlDiscord, isAuthorized, isChannelAllowed } from "./auth.js";
 import { config } from "./config.js";
 import { createDiscordClient, createRest } from "./discord.js";
 import { features, startFeatures, stopFeatures } from "./features/index.js";
@@ -74,24 +74,25 @@ function interactionResponder(interaction: ChatInputCommandInteraction): Respond
 
 function friendlyError(err: unknown): string {
   if (err instanceof Anthropic.AuthenticationError) {
-    return "The Anthropic API key was rejected. Check ANTHROPIC_API_KEY.";
+    return "Ah mate, the Anthropic API key got rejected. Check ANTHROPIC_API_KEY.";
   }
   if (err instanceof Anthropic.RateLimitError) {
-    return "The Anthropic API is rate limiting me right now. Try again in a moment.";
+    return "Oi, Anthropic's rate limitin' me. Give it a moment and try again.";
   }
   if (err instanceof Anthropic.NotFoundError) {
-    return `The configured model "${config.model}" was not found. Check ANTHROPIC_MODEL.`;
+    return `The model "${config.model}" wasn't found, mate. Check ANTHROPIC_MODEL.`;
   }
   if (err instanceof Anthropic.APIError) {
     return `Anthropic API error (${err.status ?? "unknown"}): ${err.message}`.slice(0, 500);
   }
-  return `Something went wrong: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500);
+  return `Somethin' went wrong, mate: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500);
 }
 
 async function handleRequest(params: {
   client: Client;
   requesterId: string;
   requesterName: string;
+  discordControl: boolean;
   channelId: string;
   triggerMessageId?: string;
   channel: SendableChannels | null;
@@ -105,6 +106,7 @@ async function handleRequest(params: {
     rest,
     guildId: config.guildId,
     requesterId: params.requesterId,
+    discordControl: params.discordControl,
     channelId: params.channelId,
     triggerMessageId: params.triggerMessageId,
     confirm: async (summary) => {
@@ -169,24 +171,25 @@ client.on(Events.MessageCreate, async (message) => {
         roleIds,
       })
     ) {
-      await message.reply({ content: "You are not authorized to use the agent.", allowedMentions: NO_MENTIONS });
+      await message.reply({ content: "Yeah nah, mate. You're not authorized to use me.", allowedMentions: NO_MENTIONS });
       return;
     }
 
     if (/^(reset|forget|clear)$/i.test(text)) {
       clearHistory(message.channelId);
-      await message.reply({ content: "Conversation memory for this channel cleared.", allowedMentions: NO_MENTIONS });
+      await message.reply({ content: "Alright. Wiped me memory for this channel. Fresh start.", allowedMentions: NO_MENTIONS });
       return;
     }
 
     const channel = message.channel.isSendable() ? message.channel : null;
     if (!channel) return;
-    const working = await message.reply({ content: "Working...", allowedMentions: NO_MENTIONS });
+    const working = await message.reply({ content: "Oi, gimme a sec...", allowedMentions: NO_MENTIONS });
 
     await handleRequest({
       client,
       requesterId: message.author.id,
       requesterName: message.member?.displayName ?? message.author.username,
+      discordControl: canControlDiscord({ userId: message.author.id, roleIds }),
       channelId: message.channelId,
       triggerMessageId: message.id,
       channel,
@@ -218,7 +221,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       })
     ) {
       await interaction.reply({
-        content: "You are not authorized to use the agent here.",
+        content: "Yeah nah, mate. You're not authorized to use me here.",
         ephemeral: true,
       });
       return;
@@ -226,7 +229,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.commandName === "agent-reset") {
       clearHistory(interaction.channelId);
-      await interaction.reply({ content: "Conversation memory for this channel cleared.", ephemeral: true });
+      await interaction.reply({ content: "Alright. Wiped me memory for this channel. Fresh start.", ephemeral: true });
       return;
     }
 
@@ -238,6 +241,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       client,
       requesterId: interaction.user.id,
       requesterName: interaction.user.username,
+      discordControl: canControlDiscord({ userId: interaction.user.id, roleIds }),
       channelId: interaction.channelId,
       channel,
       guildName: interaction.guild?.name ?? "the server",
@@ -257,7 +261,7 @@ async function registerCommands(): Promise<void> {
   const commands = [
     new SlashCommandBuilder()
       .setName("agent")
-      .setDescription("Ask the AI agent to manage the server")
+      .setDescription("Ask the bot")
       .addStringOption((o) =>
         o.setName("request").setDescription("What should the agent do?").setRequired(true).setMaxLength(2000),
       )
