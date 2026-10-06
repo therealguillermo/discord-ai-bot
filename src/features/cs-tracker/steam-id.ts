@@ -46,13 +46,13 @@ export function parseSteamInput(raw: string): { kind: "steamid64"; value: string
 
 export type ResolveSteamOptions = {
   steamWebApiKey?: string;
-  /** Optional fallback: search CSRep by vanity/name and return the first steam id. */
+  /** @deprecated CSRep is obsolete. Vanity resolution uses the Steam Web API only. */
   searchCsrep?: (query: string) => Promise<string | null>;
 };
 
 /**
  * Resolve free-form steam input to SteamID64.
- * Vanity resolution needs STEAM_WEB_API_KEY (or a CSRep search fallback).
+ * Vanity resolution needs STEAM_WEB_API_KEY.
  */
 export async function resolveSteamId64(raw: string, opts: ResolveSteamOptions = {}): Promise<string> {
   const parsed = parseSteamInput(raw);

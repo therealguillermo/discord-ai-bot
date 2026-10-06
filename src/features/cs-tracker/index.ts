@@ -6,21 +6,14 @@ import { UserError } from "../types.js";
 import { createAggregator } from "./aggregate.js";
 import { LinkStore } from "./links.js";
 import { fetchCstrackerLeaderboard } from "./providers/cstracker.js";
+import { fetchSteamProfile } from "./providers/steam-profile.js";
 import { resolveSteamId64 } from "./steam-id.js";
 
 const links = new LinkStore({ filePath: path.join(config.dataDir, "cs-links.json") });
 const aggregator = createAggregator();
 
 async function resolveToSteamId64(raw: string): Promise<string> {
-  return resolveSteamId64(raw, {
-    steamWebApiKey: config.steamWebApiKey,
-    searchCsrep: aggregator.csrep
-      ? async (query) => {
-          const hits = await aggregator.csrep!.search(query);
-          return hits[0]?.steamId64 ?? null;
-        }
-      : undefined,
-  });
+  return resolveSteamId64(raw, { steamWebApiKey: config.steamWebApiKey });
 }
 
 function targetSteamIds(input: {
@@ -44,7 +37,7 @@ function targetSteamIds(input: {
   if (accounts.length === 0) {
     throw new UserError(
       discordId === input.requesterId
-        ? "No Steam account linked. Ask them to link one with cs_link_steam (SteamID64 or profile URL)."
+        ? "No Steam account linked. Only the bot owner can save one."
         : `Discord user ${discordId} has no linked Steam accounts.`,
     );
   }
@@ -56,27 +49,28 @@ function targetSteamIds(input: {
 const linkTool: ToolDefinition = {
   name: "cs_link_steam",
   description:
-    "Link a Steam account to a Discord user (1 Discord → many Steam). " +
-    "Defaults to the requester. Pass user_id only when the owner is linking for someone else. " +
-    "Accepts SteamID64, steamcommunity URL, or vanity (needs STEAM_WEB_API_KEY).",
+    "Save a Steam account on a Discord user (1 Discord → many Steam). Only the bot owner may call this. " +
+    "Pass user_id to save it for someone else; omit user_id to link the owner. " +
+    "Accepts SteamID64, steamcommunity URL, or vanity (needs STEAM_WEB_API_KEY). " +
+    "The first account for that user becomes primary unless primary is set.",
   input_schema: {
     type: "object",
     properties: {
       steam: { type: "string", description: "SteamID64, profile URL, or vanity." },
       label: { type: "string", description: "Optional label, e.g. main / smurf." },
-      primary: { type: "boolean", description: "Make this the primary account." },
-      user_id: { type: "string", description: "Discord user ID (owner only for others)." },
+      primary: { type: "boolean", description: "Make this the primary account. Omit unless asked." },
+      user_id: { type: "string", description: "Discord user ID to save the Steam account on. Owner only." },
     },
     required: ["steam"],
   },
   handler: async (input, ctx) => {
+    if (ctx.requesterId !== config.ownerId) {
+      throw new UserError("Only the bot owner can link Steam accounts.");
+    }
     let targetId = ctx.requesterId;
     if (input.user_id != null && String(input.user_id).trim()) {
       targetId = String(input.user_id).trim();
       if (!/^\d{15,25}$/.test(targetId)) throw new UserError("user_id must be a Discord user ID.");
-      if (targetId !== ctx.requesterId && ctx.requesterId !== config.ownerId) {
-        throw new UserError("Only the bot owner can link Steam accounts for other users.");
-      }
     }
     const steamId64 = await resolveToSteamId64(String(input.steam ?? ""));
     const link = links.link(targetId, steamId64, {
@@ -148,17 +142,17 @@ const setPrimaryTool: ToolDefinition = {
 const playerTool: ToolDefinition = {
   name: "cs_player",
   description:
-    "Fetch a merged CS player dossier from CSRep + CSST + CSTracker (+ optional Faceit/Steam APIs). " +
+    "Fetch a merged CS player dossier from CSST + CSTracker + Leetify (+ optional Faceit/Steam APIs). CSRep is obsolete and is not called. " +
     "Pass steam (ID/URL) and/or Discord user_id (uses their primary link). " +
     "Omit both to use the requester's primary link. Set all=true to fetch every linked account. " +
-    "Returns organized sections. When CSST responded, dossier.raw.csst.profile holds the labeled cards (steam, faceit, leetify, scope, cstracker, csstats, inventory). Format the Discord reply from this data; never invent stats.",
+    "Returns organized sections. When sources.leetify is ok, dossier.raw.leetify is the official profile — present those numbers unchanged and say Data Provided by Leetify. When CSST responded, dossier.raw.csst.profile holds the labeled cards (steam, faceit, leetify, scope, cstracker, csstats, inventory). Format the Discord reply from this data; never invent stats.",
   input_schema: {
     type: "object",
     properties: {
       steam: { type: "string", description: "SteamID64, URL, or vanity." },
       user_id: { type: "string", description: "Discord user ID with linked Steam account(s)." },
       all: { type: "boolean", description: "If true with user_id/requester, fetch all linked accounts." },
-      refresh: { type: "boolean", description: "Bypass cache (and request CSRep refresh if keyed)." },
+      refresh: { type: "boolean", description: "Bypass the dossier cache." },
     },
   },
   handler: async (input, ctx) => {
@@ -175,10 +169,6 @@ const playerTool: ToolDefinition = {
         all: input.all,
         requesterId: ctx.requesterId,
       });
-    }
-
-    if (bypass && aggregator.csrep) {
-      await Promise.allSettled(ids.map((id) => aggregator.csrep!.refresh(id)));
     }
 
     const dossiers = await aggregator.fetchDossiers(ids, { bypassCache: bypass });
@@ -256,30 +246,102 @@ const compareTool: ToolDefinition = {
   },
 };
 
-const searchTool: ToolDefinition = {
-  name: "cs_search",
-  description: "Search CSRep for players by name. Requires CSREP_API_KEY. Returns candidate Steam IDs.",
+const leetifyTool: ToolDefinition = {
+  name: "cs_leetify",
+  description:
+    "Read the official Leetify API. resource=profile or matches takes steam (SteamID64/URL/vanity) or leetify_id. " +
+    "resource=match takes game_id (the id on a recent match). resource=match_by_source takes data_source " +
+    "(matchmaking, faceit, renown, …) and data_source_id. " +
+    "Profile is also merged into cs_player. Present every metric exactly as returned (Aim is 0–100, winrate is a fraction). " +
+    "Link https://leetify.com/app/profile/{steam64} as View on Leetify and say Data Provided by Leetify.",
   input_schema: {
     type: "object",
     properties: {
-      query: { type: "string", description: "Player name to search." },
+      resource: {
+        type: "string",
+        enum: ["profile", "matches", "match", "match_by_source"],
+        description: "Which Leetify read to call. Default: profile.",
+      },
+      steam: { type: "string", description: "SteamID64, profile URL, or vanity. For profile and matches." },
+      user_id: { type: "string", description: "Discord user whose primary Steam link is used when steam is omitted." },
+      leetify_id: { type: "string", description: "Leetify user id. Alternative to steam for profile and matches." },
+      game_id: { type: "string", description: "Leetify game id for resource=match." },
+      data_source: { type: "string", description: "Match data source, such as matchmaking or faceit." },
+      data_source_id: { type: "string", description: "That source's own match id." },
     },
-    required: ["query"],
   },
-  handler: async (input) => {
-    if (!aggregator.csrep) {
-      throw new UserError("CSRep search needs CSREP_API_KEY in the bot environment.");
+  handler: async (input, ctx) => {
+    if (!aggregator.leetify) throw new UserError("Leetify lookups are disabled (LEETIFY_ENABLED=false).");
+    const resource = String(input.resource ?? "profile").trim().toLowerCase();
+    const client = aggregator.leetify;
+
+    if (resource === "match") {
+      const gameId = String(input.game_id ?? "").trim();
+      if (!gameId) throw new UserError("game_id is required for resource=match.");
+      const match = await leetifyCall(() => client.getMatch(gameId));
+      return { resource, game_id: gameId, attribution: "Data Provided by Leetify", match };
     }
-    const query = String(input.query ?? "").trim();
-    if (!query) throw new UserError("query is required.");
-    const results = await aggregator.csrep.search(query);
-    return { query, results };
+
+    if (resource === "match_by_source") {
+      const dataSource = String(input.data_source ?? "").trim();
+      const dataSourceId = String(input.data_source_id ?? "").trim();
+      if (!dataSource || !dataSourceId) {
+        throw new UserError("data_source and data_source_id are required for resource=match_by_source.");
+      }
+      const match = await leetifyCall(() => client.getMatchBySource(dataSource, dataSourceId));
+      return {
+        resource,
+        data_source: dataSource,
+        data_source_id: dataSourceId,
+        attribution: "Data Provided by Leetify",
+        match,
+      };
+    }
+
+    if (resource !== "profile" && resource !== "matches") {
+      throw new UserError("resource must be profile, matches, match, or match_by_source.");
+    }
+
+    const leetifyId = String(input.leetify_id ?? "").trim();
+    const steamRaw = String(input.steam ?? "").trim();
+    if (leetifyId && steamRaw) throw new UserError("Pass steam or leetify_id, not both.");
+
+    const query = leetifyId
+      ? { leetifyId }
+      : { steam64Id: steamRaw ? await resolveToSteamId64(steamRaw) : requesterSteam(input.user_id, ctx.requesterId) };
+
+    if (resource === "matches") {
+      const matches = await leetifyCall(() => client.getMatches(query));
+      return { resource, attribution: "Data Provided by Leetify", matches };
+    }
+    const profile = await leetifyCall(() => client.getProfile(query));
+    const steam64 = typeof profile.steam64_id === "string" ? profile.steam64_id : query.steam64Id;
+    return {
+      resource,
+      url: steam64 ? `https://leetify.com/app/profile/${steam64}` : undefined,
+      attribution: "Data Provided by Leetify",
+      profile,
+    };
   },
 };
 
+async function leetifyCall<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof UserError) throw err;
+    throw new UserError(err instanceof Error ? err.message : String(err));
+  }
+}
+
+function requesterSteam(userId: unknown, requesterId: string): string {
+  const ids = targetSteamIds({ user_id: userId, requesterId });
+  return ids[0]!;
+}
+
 const refreshTool: ToolDefinition = {
   name: "cs_refresh",
-  description: "Request a CSRep profile refresh, then return a fresh merged dossier.",
+  description: "Bypass the dossier cache and return a fresh merged dossier. CSRep is not contacted.",
   input_schema: {
     type: "object",
     properties: {
@@ -299,71 +361,42 @@ const refreshTool: ToolDefinition = {
       });
       steamId64 = ids[0]!;
     }
-    if (aggregator.csrep) {
-      await aggregator.csrep.refresh(steamId64);
-    }
     const dossier = await aggregator.fetchDossier(steamId64, { bypassCache: true });
-    return { refreshed: Boolean(aggregator.csrep), dossier };
+    return { refreshed: true, dossier };
   },
 };
 
-const matchTool: ToolDefinition = {
-  name: "cs_match",
+const steamProfileTool: ToolDefinition = {
+  name: "steam_profile",
   description:
-    "Look up one CSRep match by CSRep id, FACEIT match id, or Gamers Club id. Requires CSREP_API_KEY. " +
-    "Format the reply from the returned match (map, score, players). Never invent stats.",
+    "Read a Steam user's public profile: identity, bio, location, member since, online status, current game, bans, Steam level, badges, friends, groups, and the game library (recently played plus most played). " +
+    "Official Steam Web API plus the public community profile. Not the CS dossier. " +
+    "Pass steam (SteamID64, profile URL, or vanity) and/or Discord user_id (their primary linked account). Omit both to use the requester's primary link. " +
+    "Needs STEAM_WEB_API_KEY. Each section says whether it is public or private. " +
+    "Format the Discord reply only from this result. Never invent names, games, hours, bans, or counts. If a section is private, say that part is hidden.",
   input_schema: {
     type: "object",
     properties: {
-      id: { type: "string", description: "Match id for the chosen source." },
-      source: {
-        type: "string",
-        enum: ["csrep", "faceit", "gamersclub"],
-        description: "Where the id comes from. Default: csrep.",
-      },
-    },
-    required: ["id"],
-  },
-  handler: async (input) => {
-    if (!aggregator.csrep) throw new UserError("CSRep match lookup needs CSREP_API_KEY in the bot environment.");
-    const id = String(input.id ?? "").trim();
-    if (!id) throw new UserError("id is required.");
-    const sourceRaw = String(input.source ?? "csrep").trim().toLowerCase();
-    if (sourceRaw !== "csrep" && sourceRaw !== "faceit" && sourceRaw !== "gamersclub") {
-      throw new UserError("source must be csrep, faceit, or gamersclub.");
-    }
-    const match = await aggregator.csrep.getMatch(sourceRaw, id);
-    return { source: sourceRaw, id, match };
-  },
-};
-
-const importMatchTool: ToolDefinition = {
-  name: "cs_import_match",
-  description:
-    "Ask CSRep to import a Valve share code (CSGO-.....) or a FACEIT match (url and/or match id). " +
-    "Requires CSREP_API_KEY. Does not upload demo files. Pass either share_code, or faceit_url / faceit_match_id.",
-  input_schema: {
-    type: "object",
-    properties: {
-      share_code: { type: "string", description: "Valve match share code." },
-      faceit_url: { type: "string", description: "Signed FACEIT demo URL." },
-      faceit_match_id: { type: "string", description: "FACEIT match id." },
+      steam: { type: "string", description: "SteamID64, profile URL, or vanity." },
+      user_id: { type: "string", description: "Discord user ID with a linked Steam account." },
+      limit: { type: "integer", description: "How many games to return in each games list. 1-25, default 10." },
     },
   },
-  handler: async (input) => {
-    if (!aggregator.csrep) throw new UserError("CSRep match import needs CSREP_API_KEY in the bot environment.");
-    const share = input.share_code != null ? String(input.share_code).trim() : "";
-    const faceitUrl = input.faceit_url != null ? String(input.faceit_url).trim() : "";
-    const faceitMatchId = input.faceit_match_id != null ? String(input.faceit_match_id).trim() : "";
-    const hasShare = Boolean(share);
-    const hasFaceit = Boolean(faceitUrl || faceitMatchId);
-    if (hasShare === hasFaceit) {
-      throw new UserError("Pass a share_code, or a FACEIT url/match id — not both, and not neither.");
+  handler: async (input, ctx) => {
+    if (!config.steamWebApiKey) {
+      throw new UserError("Steam profile lookup needs STEAM_WEB_API_KEY in the bot env.");
     }
-    const match = hasShare
-      ? await aggregator.csrep.importShareCode(share)
-      : await aggregator.csrep.importFaceit({ url: faceitUrl || undefined, matchId: faceitMatchId || undefined });
-    return { imported: true, match };
+    const steamRaw = input.steam != null ? String(input.steam).trim() : "";
+    const steamId64 = steamRaw
+      ? await resolveToSteamId64(steamRaw)
+      : requesterSteam(input.user_id, ctx.requesterId);
+    const limit = Math.min(25, Math.max(1, Number(input.limit ?? 10) || 10));
+    try {
+      return await fetchSteamProfile(steamId64, config.steamWebApiKey, limit);
+    } catch (err) {
+      if (err instanceof UserError) throw err;
+      throw new UserError(err instanceof Error ? err.message : String(err));
+    }
   },
 };
 
@@ -397,19 +430,18 @@ export const csTrackerFeature: Feature = {
     listLinksTool,
     setPrimaryTool,
     playerTool,
+    steamProfileTool,
+    leetifyTool,
     compareTool,
-    searchTool,
     refreshTool,
-    matchTool,
-    importMatchTool,
     leaderboardTool,
   ],
   start: async () => {
     await links.load();
     const providers = [
-      config.csrepApiKey ? "csrep" : null,
       config.csstEnabled ? "csst" : null,
       config.cstrackerEnabled ? "cstracker" : null,
+      config.leetifyEnabled ? (config.leetifyApiKey ? "leetify" : "leetify(no key)") : null,
       config.faceitApiKey ? "faceit" : null,
       config.steamWebApiKey ? "steam" : null,
     ].filter(Boolean);

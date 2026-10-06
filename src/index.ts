@@ -15,7 +15,7 @@ import { createDiscordClient, createRest } from "./discord.js";
 import { features, startFeatures, stopFeatures } from "./features/index.js";
 import { audit, requestConfirmation } from "./safety/confirm.js";
 import { endpointCount } from "./tools/discordCall.js";
-import type { ToolContext } from "./tools/types.js";
+import type { ToolContext, ReplyDraft } from "./tools/types.js";
 
 const client = createDiscordClient();
 const rest = createRest();
@@ -46,12 +46,29 @@ interface Responder {
   finish: (text: string) => Promise<void>;
 }
 
-function messageResponder(working: Message, channel: SendableChannels): Responder {
+function createReplyDraft(): ReplyDraft {
+  return {
+    embeds: [],
+    set(next) {
+      this.content = next.content;
+      this.embeds = next.embeds;
+    },
+  };
+}
+
+function messageResponder(working: Message, channel: SendableChannels, reply: ReplyDraft): Responder {
   return {
     update: async (text) => {
       await working.edit({ content: text, allowedMentions: NO_MENTIONS }).catch(() => undefined);
     },
     finish: async (text) => {
+      if (reply.embeds.length) {
+        await finishWithEmbeds(text, reply, {
+          edit: (body) => working.edit(body),
+          send: (content) => channel.send({ content, allowedMentions: NO_MENTIONS }).then(() => undefined),
+        });
+        return;
+      }
       const [first, ...others] = chunk(text);
       await working.edit({ content: first, allowedMentions: NO_MENTIONS }).catch(() => undefined);
       for (const part of others) await channel.send({ content: part, allowedMentions: NO_MENTIONS });
@@ -59,17 +76,44 @@ function messageResponder(working: Message, channel: SendableChannels): Responde
   };
 }
 
-function interactionResponder(interaction: ChatInputCommandInteraction): Responder {
+function interactionResponder(interaction: ChatInputCommandInteraction, reply: ReplyDraft): Responder {
   return {
     update: async (text) => {
       await interaction.editReply({ content: text, allowedMentions: NO_MENTIONS }).catch(() => undefined);
     },
     finish: async (text) => {
+      if (reply.embeds.length) {
+        await finishWithEmbeds(text, reply, {
+          edit: (body) => interaction.editReply(body),
+          send: (content) => interaction.followUp({ content, allowedMentions: NO_MENTIONS }).then(() => undefined),
+        });
+        return;
+      }
       const [first, ...others] = chunk(text);
       await interaction.editReply({ content: first, allowedMentions: NO_MENTIONS }).catch(() => undefined);
       for (const part of others) await interaction.followUp({ content: part, allowedMentions: NO_MENTIONS });
     },
   };
+}
+
+async function finishWithEmbeds(
+  text: string,
+  reply: ReplyDraft,
+  transport: {
+    edit: (body: { content: string | null; embeds: ReplyDraft["embeds"]; allowedMentions: typeof NO_MENTIONS }) => Promise<unknown>;
+    send: (content: string) => Promise<void>;
+  },
+): Promise<void> {
+  const caption = text.trim() || reply.content || "";
+  const [first, ...others] = caption ? chunk(caption) : [null];
+  await transport.edit({
+    content: first,
+    embeds: reply.embeds,
+    allowedMentions: NO_MENTIONS,
+  }).catch(() => undefined);
+  for (const part of others) {
+    if (part) await transport.send(part);
+  }
 }
 
 function friendlyError(err: unknown): string {
@@ -99,6 +143,7 @@ async function handleRequest(params: {
   guildName: string;
   text: string;
   responder: Responder;
+  reply: ReplyDraft;
 }): Promise<void> {
   const { channel } = params;
   const ctx: ToolContext = {
@@ -113,6 +158,7 @@ async function handleRequest(params: {
       if (!channel) return false;
       return requestConfirmation(channel, params.requesterId, summary);
     },
+    reply: params.reply,
   };
 
   try {
@@ -184,6 +230,7 @@ client.on(Events.MessageCreate, async (message) => {
     const channel = message.channel.isSendable() ? message.channel : null;
     if (!channel) return;
     const working = await message.reply({ content: "Oi, gimme a sec...", allowedMentions: NO_MENTIONS });
+    const reply = createReplyDraft();
 
     await handleRequest({
       client,
@@ -195,7 +242,8 @@ client.on(Events.MessageCreate, async (message) => {
       channel,
       guildName: message.guild.name,
       text,
-      responder: messageResponder(working, channel),
+      responder: messageResponder(working, channel, reply),
+      reply,
     });
   } catch (err) {
     console.error("[messageCreate] error:", err);
@@ -237,6 +285,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await interaction.deferReply();
 
     const channel = interaction.channel?.isSendable() ? interaction.channel : null;
+    const reply = createReplyDraft();
     await handleRequest({
       client,
       requesterId: interaction.user.id,
@@ -246,7 +295,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       channel,
       guildName: interaction.guild?.name ?? "the server",
       text,
-      responder: interactionResponder(interaction),
+      responder: interactionResponder(interaction, reply),
+      reply,
     });
   } catch (err) {
     console.error("[interactionCreate] error:", err);

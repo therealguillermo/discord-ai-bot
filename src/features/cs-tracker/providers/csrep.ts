@@ -1,3 +1,7 @@
+/**
+ * Obsolete. CSRep's API is not available to this bot, so nothing in the live
+ * dossier path calls this module. Kept so the response parser can be revived later.
+ */
 import type { ProviderPartial } from "../dossier.js";
 import { fetchJson } from "../http.js";
 

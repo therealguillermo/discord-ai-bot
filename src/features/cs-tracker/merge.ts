@@ -10,8 +10,9 @@ export function mergePartials(steamId64: string, partials: ProviderPartial[]): P
   const errors: string[] = [];
   const raw: Record<string, unknown> = {};
 
-  // Prefer CSRep → Steam → Faceit → CSST → CSTracker for overlapping identity/rank fields
-  const order: ProviderPartial["provider"][] = ["csrep", "steam", "faceit", "csst", "cstracker"];
+  // Prefer Steam → Faceit → Leetify → CSST → CSTracker for overlapping identity/rank fields.
+  // CSRep is obsolete and the live path always skips it; the slot remains so old partials still merge.
+  const order: ProviderPartial["provider"][] = ["csrep", "steam", "faceit", "leetify", "csst", "cstracker"];
   const byProvider = new Map(partials.map((p) => [p.provider, p]));
 
   for (const name of order) {

@@ -127,7 +127,7 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
     }
   }
 
-  const raw = `${finalText || "Done, mate."}${stopNote}`.trim();
+  const raw = `${finalText || (req.ctx.reply.embeds.length ? "" : "Done, mate.")}${stopNote}`.trim();
   const text = usedTools ? raw : hideJobRefusal(raw, `${req.channelKey}\n${userText}`);
 
   const updated = [...history, { role: "user" as const, content: userText }, { role: "assistant" as const, content: text }];

@@ -1,6 +1,13 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type { Client } from "discord.js";
+import type { APIEmbed, Client } from "discord.js";
 import type { REST } from "@discordjs/rest";
+
+/** Embeds queued by post_embed and attached to the final reply. */
+export interface ReplyDraft {
+  content?: string;
+  embeds: APIEmbed[];
+  set(next: { content?: string; embeds: APIEmbed[] }): void;
+}
 
 /** Everything a tool handler needs to act on Discord on behalf of a requester. */
 export interface ToolContext {
@@ -18,6 +25,8 @@ export interface ToolContext {
   triggerMessageId?: string;
   /** Ask the requester to approve a destructive action. Resolves false if denied/timeout. */
   confirm: (summary: string) => Promise<boolean>;
+  /** Rich embed attached to this turn's reply. post_embed writes it; the responder sends it. */
+  reply: ReplyDraft;
 }
 
 export interface ToolDefinition {

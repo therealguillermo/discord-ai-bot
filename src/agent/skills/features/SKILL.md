@@ -2,8 +2,8 @@
 name: features
 description: >-
   Server features beyond raw Discord admin: coins/economy, blackjack, coinflip,
-  purge, vote timeout, AI image generation, and CS tracker (Steam links + player
-  dossiers) — which tool to call and the rules.
+  purge, vote timeout, AI image generation, CS tracker (Steam links + player
+  dossiers), and public Steam profiles — which tool to call and the rules.
 ---
 
 # Features skill
@@ -172,19 +172,17 @@ Music has its own skill. Load `load_skill name="music" topic="play"` (or skip/qu
 
 ## CS tracker / Steam / FACEIT / trust
 
-**keywords:** cs, cs2, steam, faceit, leetify, premier, trust, vac, csrep, csst, cstracker, link steam, my rank
+**keywords:** cs, cs2, steam, faceit, leetify, premier, trust, vac, csst, cstracker, link steam, save steam, map steam, my rank
 
-**prefer tools:** `cs_player`, `cs_link_steam`, `cs_list_links`, `cs_compare`, `cs_match`, `cs_leaderboard`
+**prefer tools:** `cs_player`, `cs_leetify`, `cs_link_steam`, `cs_list_links`, `cs_compare`, `cs_leaderboard`
 
 ```
-cs_link_steam({ steam: "<SteamID64|profile URL|vanity>", label?: "main", primary?: true })
+cs_link_steam({ steam: "<SteamID64|profile URL|vanity>", user_id?: "<snowflake>", label?: "main", primary?: true })
 cs_list_links({ user_id?: "<snowflake>" })
 cs_player({ steam?: "...", user_id?: "<snowflake>", all?: false, refresh?: false })
+cs_leetify({ resource?: "profile" | "matches" | "match" | "match_by_source", steam?: "...", leetify_id?: "...", game_id?: "...", data_source?: "faceit", data_source_id?: "..." })
 cs_compare({ targets: [{ user_id: "..." }, { steam: "..." }] })
-cs_match({ id: "<match id>", source?: "csrep" | "faceit" | "gamersclub" })
-cs_import_match({ share_code?: "CSGO-.....", faceit_url?: "...", faceit_match_id?: "..." })
 cs_leaderboard({ limit?: 15 })
-cs_search({ query: "<name>" })   // needs CSREP_API_KEY
 cs_refresh({ steam?: "...", user_id?: "..." })
 cs_unlink_steam({ steam: "<id|label>" })
 cs_set_primary({ steam: "<id|label>" })
@@ -192,19 +190,50 @@ cs_set_primary({ steam: "<id|label>" })
 
 **rules:**
 - One Discord user can link **many** Steam accounts. Steam IDs are unique guild-wide.
-- Tools fetch and merge CSRep + CSST + CSTracker (+ Faceit/Steam when keyed). You **format** the reply from the dossier — never invent ranks, bans, or trust scores.
+- Tools fetch and merge CSST + CSTracker + Leetify (+ Faceit/Steam when keyed). CSRep is obsolete and is not called. You **format** the reply from the dossier — never invent ranks, bans, or trust scores.
+- When `sources.leetify` is `ok`, `dossier.raw.leetify` is the official profile (`ranks`, `rating`, `stats`, `recent_matches`). Show those numbers as returned: Aim stays 0–100, winrate stays a fraction. Link `links.leetify` as “View on Leetify” and say “Data Provided by Leetify”. If Leetify errored, use the CSST leetify card only when `sources.csst` is `ok`.
+- `cs_leetify` is the direct read: `profile`, `matches` (full history, large), `match` (`game_id`), or `match_by_source` (`data_source` + `data_source_id`). `cs_player` already includes the profile.
 - When `sources.csst` is `ok`, `dossier.raw.csst.profile` is the categorized csst.at page (steam, faceit csgo/cs2, leetify, scope, cstracker, csstats, inventory, medals). Use those labeled fields. If `sources.csst` is `error`, say it was blocked or was placeholder data, and do not fill CSST numbers from anywhere else.
-- `cs_match` and `cs_import_match` need `CSREP_API_KEY`. Import takes a Valve share code **or** a FACEIT url/match id, not a demo upload.
-- Comparing several players uses CSRep's batch player route. Format match replies from `map`, `score`, and `players` only.
-- If `sources` shows errors/skipped or `errors` is present, say what was missing.
-- For "what's my CS / faceit?", call `cs_player` with no args (uses requester's primary link). If unlink/no link, tell them to send a Steam profile URL and call `cs_link_steam`.
+- If `sources` shows errors/skipped or `errors` is present, say what was missing. `sources.csrep` stays `skipped`.
+- Questions about a Steam profile or which games someone plays are `steam_profile`, not this dossier.
+- For "what's my CS / faceit?", call `cs_player` with no args (uses requester's primary link). If there is no link, say so. Only the owner can save one.
+- `cs_link_steam` is owner-only. When the requester's user ID is the owner and they ask to save a Discord user to a Steam profile, call it with `steam` and that person's `user_id`. A `<@id>` mention is the ID. Omit `user_id` to link the owner. Omit `primary` unless they asked; the first account becomes primary. One call per pair. If anyone else asks to save or link a Steam account, refuse and do not call the tool.
 - Resolve Discord names with `find_members` before `user_id`.
-- Build Discord messages/embeds dynamically from dossier sections (`identity`, `cs2`, `faceit`, `leetify`, `trust`, `bans`, `links`).
+- Show a dossier as a card with `post_embed`: title, thumbnail_url, fields, and a footer. Copy numbers from the dossier. Link Leetify as “View on Leetify” and say “Data Provided by Leetify” when `sources.leetify` is `ok`.
 
 **example:** "what's dubbus's faceit?"
 1. `find_members` → user_id (or use steam URL if they pasted one)
 2. `cs_player` user_id=… (or steam=…)
 3. Reply from `dossier.faceit` / related sections only.
+
+---
+
+## steam profile
+
+**keywords:** steam profile, steam games, what games, library, recently played, most played, games he plays, games owned, friends, badges, steam level, bans
+
+**prefer tool:** `steam_profile`
+
+```
+steam_profile({
+  steam?: "<SteamID64|profile URL|vanity>",
+  user_id?: "<snowflake>",
+  limit?: 1-25   // default 10, games lists only
+})
+```
+
+**rules:**
+- This is the public Steam profile, including the game library. `cs_player` is CS stats only — do not tell the user you cannot look up Steam.
+- Resolve Discord names with `find_members` before `user_id`. A pasted Steam URL or ID goes in `steam`. Omit both to use the requester's primary link.
+- Answer from the sections they asked about. A general "what can you tell me" covers `identity`, `presence`, `bans`, `level`, `badges`, `friends`, `groups`, and `games` (`recent`, `mostPlayed`, `gameCount`).
+- If a section's `visibility` is `private`, say that part is hidden. Do not guess.
+- Needs `STEAM_WEB_API_KEY`. If the tool says it is missing, relay that.
+- Show a profile overview as a card with `post_embed` when it is more than a one-line games answer. Copy every name and number from the tool result.
+
+**example:** "what steam games does this guy play, and what else is public"
+1. `find_members` → user_id (or use the Steam URL if they pasted one)
+2. `steam_profile` user_id=…
+3. Reply from `games` plus the other public sections.
 
 ---
 
@@ -241,6 +270,8 @@ generate_image({
 | vote timeout @user | `start_vote_timeout` | not immediate mute |
 | mute @user now | `timeout_member` | use `discord-api` skill |
 | draw / generate image | `generate_image` | cooldown; needs OpenAI key |
-| CS / faceit / steam / trust | `cs_player` | link first via `cs_link_steam` |
-| link my steam | `cs_link_steam` | SteamID64 or profile URL |
+| CS / faceit / trust / leetify | `cs_player` | link first via `cs_link_steam`; Leetify profile is included |
+| what steam games / steam profile / library | `steam_profile` | public profile plus owned and recently played games |
+| leetify match history / one match | `cs_leetify` | `matches`, `match`, or `match_by_source` |
+| save / link a user to a Steam profile | `cs_link_steam` | owner only; `user_id` + Steam URL or ID |
 | CS leaderboard | `cs_leaderboard` | CSTracker best-effort |

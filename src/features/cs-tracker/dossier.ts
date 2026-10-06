@@ -59,6 +59,7 @@ export interface PlayerDossier {
     cstracker: SourceStatus;
     faceit: SourceStatus;
     steam: SourceStatus;
+    leetify: SourceStatus;
   };
   /** field path → provider that supplied it */
   provenance: Record<string, string>;
@@ -98,6 +99,7 @@ export function emptyDossier(steamId64: string): PlayerDossier {
       csst: `https://csst.at/profile/${steamId64}`,
       cstracker: `https://cstracker.gg/players/${steamId64}`,
       steam: `https://steamcommunity.com/profiles/${steamId64}`,
+      leetify: `https://leetify.com/app/profile/${steamId64}`,
     },
     freshness: { fetchedAt: new Date().toISOString(), providerTimestamps: {} },
     sources: {
@@ -106,6 +108,7 @@ export function emptyDossier(steamId64: string): PlayerDossier {
       cstracker: "skipped",
       faceit: "skipped",
       steam: "skipped",
+      leetify: "skipped",
     },
     provenance: {},
     errors: [],

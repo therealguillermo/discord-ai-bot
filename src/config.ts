@@ -72,8 +72,14 @@ const schema = z.object({
   YTDLP_COOKIES_FROM_BROWSER: optStr,
 
   // ---- CS tracker (Discord ↔ Steam links + multi-provider dossiers) ----
+  /** Unused. CSRep is obsolete and the live dossier path does not read this. */
   CSREP_API_KEY: optStr,
   FACEIT_API_KEY: optStr,
+  LEETIFY_API_KEY: optStr,
+  LEETIFY_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => (v == null || v.trim() === "" ? true : !/^(0|false|no|off)$/i.test(v.trim()))),
   STEAM_WEB_API_KEY: optStr,
   CSST_API_KEY: optStr,
   CSST_ENABLED: z
@@ -127,6 +133,8 @@ function load() {
 
     csrepApiKey: e.CSREP_API_KEY,
     faceitApiKey: e.FACEIT_API_KEY,
+    leetifyApiKey: e.LEETIFY_API_KEY,
+    leetifyEnabled: e.LEETIFY_ENABLED,
     steamWebApiKey: e.STEAM_WEB_API_KEY,
     csstApiKey: e.CSST_API_KEY,
     csstEnabled: e.CSST_ENABLED,

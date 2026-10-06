@@ -50,5 +50,27 @@ describe("mergePartials", () => {
     expect(d.provenance["identity.avatarUrl"]).toBe("steam");
     expect(d.errors).toContain("blocked");
     expect(d.links.csrep).toContain("76561198160182330");
+    expect(d.sources.leetify).toBe("skipped");
+  });
+
+  it("keeps the official Leetify rating ahead of the CSST card", () => {
+    const d = mergePartials("76561197969209908", [
+      {
+        provider: "leetify",
+        status: "ok",
+        leetify: { rating: 2.12, url: "https://leetify.com/app/profile/76561197969209908" },
+        cs2: { premierRating: 19309 },
+      },
+      {
+        provider: "csst",
+        status: "ok",
+        leetify: { rating: 1.2 },
+        cs2: { premierRating: 15000 },
+      },
+    ]);
+    expect(d.leetify.rating).toBe(2.12);
+    expect(d.cs2.premierRating).toBe(19309);
+    expect(d.provenance["leetify.rating"]).toBe("leetify");
+    expect(d.sources.leetify).toBe("ok");
   });
 });
