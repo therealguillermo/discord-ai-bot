@@ -2,10 +2,12 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { APIEmbed, Client } from "discord.js";
 import type { REST } from "@discordjs/rest";
 
-/** Embeds queued by post_embed and attached to the final reply. */
+/** Embeds and stickers queued for the final reply. */
 export interface ReplyDraft {
   content?: string;
   embeds: APIEmbed[];
+  /** Guild sticker IDs attached to the final reply (Discord allows up to 3). */
+  stickerIds: string[];
   set(next: { content?: string; embeds: APIEmbed[] }): void;
 }
 

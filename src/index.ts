@@ -49,6 +49,7 @@ interface Responder {
 function createReplyDraft(): ReplyDraft {
   return {
     embeds: [],
+    stickerIds: [],
     set(next) {
       this.content = next.content;
       this.embeds = next.embeds;
@@ -62,8 +63,8 @@ function messageResponder(working: Message, channel: SendableChannels, reply: Re
       await working.edit({ content: text, allowedMentions: NO_MENTIONS }).catch(() => undefined);
     },
     finish: async (text) => {
-      if (reply.embeds.length) {
-        await finishWithEmbeds(text, reply, {
+      if (reply.embeds.length || reply.stickerIds.length) {
+        await finishRich(text, reply, {
           edit: (body) => working.edit(body),
           send: (content) => channel.send({ content, allowedMentions: NO_MENTIONS }).then(() => undefined),
         });
@@ -82,8 +83,8 @@ function interactionResponder(interaction: ChatInputCommandInteraction, reply: R
       await interaction.editReply({ content: text, allowedMentions: NO_MENTIONS }).catch(() => undefined);
     },
     finish: async (text) => {
-      if (reply.embeds.length) {
-        await finishWithEmbeds(text, reply, {
+      if (reply.embeds.length || reply.stickerIds.length) {
+        await finishRich(text, reply, {
           edit: (body) => interaction.editReply(body),
           send: (content) => interaction.followUp({ content, allowedMentions: NO_MENTIONS }).then(() => undefined),
         });
@@ -96,21 +97,37 @@ function interactionResponder(interaction: ChatInputCommandInteraction, reply: R
   };
 }
 
-async function finishWithEmbeds(
+async function finishRich(
   text: string,
   reply: ReplyDraft,
   transport: {
-    edit: (body: { content: string | null; embeds: ReplyDraft["embeds"]; allowedMentions: typeof NO_MENTIONS }) => Promise<unknown>;
+    edit: (body: {
+      content: string | null;
+      allowedMentions: typeof NO_MENTIONS;
+      embeds?: ReplyDraft["embeds"];
+      stickers?: string[];
+    }) => Promise<unknown>;
     send: (content: string) => Promise<void>;
   },
 ): Promise<void> {
   const caption = text.trim() || reply.content || "";
   const [first, ...others] = caption ? chunk(caption) : [null];
-  await transport.edit({
+  const body = {
     content: first,
-    embeds: reply.embeds,
     allowedMentions: NO_MENTIONS,
-  }).catch(() => undefined);
+    ...(reply.embeds.length ? { embeds: reply.embeds } : {}),
+    ...(reply.stickerIds.length ? { stickers: reply.stickerIds.slice(0, 3) } : {}),
+  };
+  try {
+    await transport.edit(body);
+  } catch (err) {
+    console.error("[reply] failed to attach sticker or embed:", err);
+    await transport.edit({
+      content: first,
+      allowedMentions: NO_MENTIONS,
+      ...(reply.embeds.length ? { embeds: reply.embeds } : {}),
+    }).catch(() => undefined);
+  }
   for (const part of others) {
     if (part) await transport.send(part);
   }

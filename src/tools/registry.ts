@@ -4,6 +4,7 @@ import { featureTools } from "../features/index.js";
 import { audit } from "../safety/confirm.js";
 import { curatedTools } from "./curated.js";
 import { discordCall, discordSearchEndpoints } from "./discordCall.js";
+import { showDamien } from "./damien.js";
 import { postEmbed } from "./embed.js";
 import { loadSkill } from "./skills.js";
 import type { ToolContext, ToolDefinition } from "./types.js";
@@ -11,6 +12,7 @@ import type { ToolContext, ToolDefinition } from "./types.js";
 export const allTools: ToolDefinition[] = [
   loadSkill,
   postEmbed,
+  showDamien,
   ...curatedTools,
   ...featureTools,
   discordSearchEndpoints,

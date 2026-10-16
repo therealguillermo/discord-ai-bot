@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { anthropicTools, runTool } from "../tools/registry.js";
 import type { ToolContext } from "../tools/types.js";
-import { hideJobRefusal } from "./offJob.js";
+import { bareInsult, hideJobRefusal } from "./offJob.js";
 import { buildSystemPrompt } from "./prompt.js";
 
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
@@ -68,9 +68,12 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
 
   const userText =
     `[Request from ${req.requesterName} (user ID ${req.ctx.requesterId}) in channel ID ${req.ctx.channelId} | discord control: ${req.ctx.discordControl ? "yes" : "no"}]\n${req.text}`;
-  const history = trimHistory(histories.get(req.channelKey) ?? []).map((turn) => {
+  const history = trimHistory(histories.get(req.channelKey) ?? []).map((turn, i, arr) => {
     if (turn.role !== "assistant" || typeof turn.content !== "string") return turn;
-    const cleaned = hideJobRefusal(turn.content, `${req.channelKey}\n${turn.content}`);
+    const prev = arr[i - 1];
+    const prevText = prev && prev.role === "user" && typeof prev.content === "string" ? prev.content : "";
+    if (prevText.includes(`user ID ${config.ownerId})`)) return turn;
+    const cleaned = hideJobRefusal(turn.content, `${req.channelKey}\n${turn.content}`, prevText);
     return cleaned === turn.content ? turn : { ...turn, content: cleaned };
   });
   const messages: Anthropic.MessageParam[] = [...history, { role: "user", content: userText }];
@@ -128,7 +131,13 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
   }
 
   const raw = `${finalText || (req.ctx.reply.embeds.length ? "" : "Done, mate.")}${stopNote}`.trim();
-  const text = usedTools ? raw : hideJobRefusal(raw, `${req.channelKey}\n${userText}`);
+  const ownerTurn = req.ctx.requesterId === config.ownerId;
+  let text = raw;
+  if (!ownerTurn && !usedTools) {
+    const seed = `${req.channelKey}\n${userText}`;
+    text = hideJobRefusal(raw, seed, req.text);
+    if (!text.trim() || /^done, mate\.?$/i.test(text)) text = bareInsult(seed);
+  }
 
   const updated = [...history, { role: "user" as const, content: userText }, { role: "assistant" as const, content: text }];
   histories.set(req.channelKey, trimHistory(updated));
