@@ -24,7 +24,9 @@ const optStr = z
 const schema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY is required"),
   ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-5"),
-  DISCORD_BOT_TOKEN: z.string().min(1, "DISCORD_BOT_TOKEN is required"),
+  /** Sassy's bot token. DISCORD_BOT_TOKEN is still accepted when this is unset. */
+  SASSYTHESASQUATCH: optStr,
+  DISCORD_BOT_TOKEN: optStr,
   DISCORD_APP_ID: snowflake,
   DISCORD_GUILD_ID: snowflake,
   OWNER_USER_ID: snowflake,
@@ -102,10 +104,17 @@ function load() {
     process.exit(1);
   }
   const e = parsed.data;
+  const discordToken = e.SASSYTHESASQUATCH ?? e.DISCORD_BOT_TOKEN;
+  if (!discordToken) {
+    console.error(
+      "Invalid environment configuration:\n  - SASSYTHESASQUATCH: set Sassy's bot token (DISCORD_BOT_TOKEN is still accepted)",
+    );
+    process.exit(1);
+  }
   return {
     anthropicApiKey: e.ANTHROPIC_API_KEY,
     model: e.ANTHROPIC_MODEL,
-    discordToken: e.DISCORD_BOT_TOKEN,
+    discordToken,
     appId: e.DISCORD_APP_ID,
     guildId: e.DISCORD_GUILD_ID,
     ownerId: e.OWNER_USER_ID,

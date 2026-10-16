@@ -36,7 +36,7 @@ flowchart LR
 
 1. Open <https://discord.com/developers/applications> and create an application. Copy the **Application ID**
    (`DISCORD_APP_ID`).
-2. Open the **Bot** tab, click **Reset Token**, and copy it into `.env` as `DISCORD_BOT_TOKEN`.
+2. Open the **Bot** tab, click **Reset Token**, and copy it into `.env` as `SASSYTHESASQUATCH`.
 3. On the same tab, under **Privileged Gateway Intents**, enable **Message Content Intent** and
    **Server Members Intent**.
 4. Open **OAuth2 > URL Generator**, select the scopes `bot` and `applications.commands`, and choose permissions.
