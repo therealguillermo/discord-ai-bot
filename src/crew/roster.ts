@@ -1,5 +1,6 @@
 import type { CharacterId } from "../agent/characters/index.js";
 import type { CrewMention } from "../agent/prompt.js";
+import { MENTION_IN_PLACE } from "./mentions.js";
 
 export interface CrewMember {
   characterId: CharacterId;
@@ -29,8 +30,8 @@ export function describeCrew(selfUserId: string, fromCrew: boolean): string | un
   if (!others.length) return undefined;
   const list = others.map((member) => `${member.name} ${member.mention}`).join(", ");
   const hint = fromCrew
-    ? "They spoke in this same channel conversation. Answer in character so everyone in the chat can follow. To keep the banter going, @mention exactly one other bot from this list. If someone else is typing or talking, finish your line anyway."
-    : "Answer into the channel as one conversation with the people and these bots. If they asked you to talk with these bots, @mention exactly one of them. A person who interjects is part of this chat. Finish your message even if someone pings another bot while you are typing. Otherwise do not mention these bots.";
+    ? `They spoke in this same channel conversation. Answer in character so everyone in the chat can follow. To keep the banter going, name another bot from this list by writing their mention where the name goes. ${MENTION_IN_PLACE} If someone else is typing or talking, finish your line anyway. Do not announce anyone's job title.`
+    : `Answer into the channel as one conversation with the people and these bots. If they asked you to talk with these bots, write that bot's mention where their name goes. ${MENTION_IN_PLACE} A person who interjects is part of this chat. Finish your message even if someone pings another bot while you are typing. Do not announce anyone's job title. Otherwise do not mention these bots.`;
   return `Other bots online: ${list}. ${hint}`;
 }
 

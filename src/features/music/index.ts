@@ -45,7 +45,8 @@ const musicPlay: ToolDefinition = {
   name: "music_play",
   description:
     "Join the requester's voice channel if needed, resolve a URL or search query with yt-dlp, and play it " +
-    "(starts immediately if idle, otherwise queues). Pass the query/URL exactly as the requester said it.",
+    "(starts immediately if idle, otherwise queues). Pass the query/URL exactly as the requester said it. " +
+    "action \"started\" means the song is playing. Say the title. Do not say you are unsure.",
   input_schema: {
     type: "object",
     properties: {

@@ -13,7 +13,7 @@ description: >-
 2. The requester must be in a voice channel for join/play (tools error if not).
 3. Pass URLs and search text **exactly** as the requester said them.
 4. Queue positions are **1-based** and refer to the **upcoming** queue (not the song currently playing). Call `music_queue` before move/remove when unclear.
-5. After play/skip/move, reply in one short line. Do not invent now-playing state — use tool results.
+5. After play/skip/move, reply in one short line. Do not invent now-playing state — use tool results. If the tool says the track started, it is playing. Do not say you are unsure, and do not mention a playing flag.
 6. Needs host binaries: `yt-dlp` and `ffmpeg` (or `YTDLP_PATH` / `FFMPEG_PATH` in env).
 
 ---

@@ -23,8 +23,16 @@ describe("character voices", () => {
     expect(prompt).toContain("from crew bot: yes");
     expect(prompt).toContain("## One conversation");
     expect(prompt).toContain("Banter with the other bots stays.");
+    expect(prompt).toContain("that name is their mention");
+    expect(prompt).toContain("Do not say Sassy, Clarence, Donny, or Nolzy and then paste the mention on the end.");
     expect(prompt).toContain("Overlapping messages are normal.");
+    expect(prompt).toContain("Chat like a normal person in Discord");
+    expect(prompt).toContain("Never introduce yourself by your job");
     expect(prompt).toContain("A newer message does not erase a server job");
+    expect(prompt).toContain("including a song already playing, stays finished");
+    expect(prompt).toContain("## Sound like one person");
+    expect(prompt).toContain("only passed it along");
+    expect(prompt).toContain("I'm sorry I'm a soggy biscuit.");
     expect(prompt).toContain(characters.sassy.offJob);
     expect(characters.sassy.profile).toBe("locked");
   });
@@ -37,6 +45,7 @@ describe("character voices", () => {
     expect(prompt).toContain("Clarence gets cruelty");
     expect(prompt).toContain("You call him Nolzy, not Mike.");
     expect(prompt).toContain("You're fucken' jokin'.");
+    expect(prompt).toContain("Do not quote their line.");
     expect(prompt).toContain("Fiddy bucks");
     expect(prompt).not.toContain("surfer drawl");
     expect(prompt).not.toContain("department");
@@ -51,6 +60,8 @@ describe("character voices", () => {
     expect(prompt).toContain("Hoovin' Shmoovin'");
     expect(prompt).toContain("Wanting to be liked does not change the rules");
     expect(prompt).toContain("You call Mike Nolan Nolzy.");
+    expect(prompt).toContain("You do not staple a music update onto a roast.");
+    expect(prompt).toContain("If you did not call a music tool on this turn");
     expect(prompt).not.toContain(PROFILE_PENDING);
     expect(prompt).not.toContain("department");
   });
@@ -65,6 +76,7 @@ describe("character voices", () => {
     expect(prompt).toContain("broad Australian drawl");
     expect(prompt).toContain("Fuck me sideways");
     expect(prompt).toContain("I'll tell ya that much");
+    expect(prompt).toContain("A roast or a handoff is one jab");
     expect(prompt).toContain("You do not explain how to hide money");
     expect(prompt).not.toContain(PROFILE_PENDING);
     expect(prompt).not.toContain("department");
@@ -90,6 +102,10 @@ describe("character voices", () => {
     expect(prompt).toContain("## One conversation");
     expect(prompt).toContain("Banter with the other bots stays.");
     expect(prompt).toContain("Overlapping messages are normal.");
+    expect(prompt).toContain("Chat like a normal person in Discord");
+    expect(prompt).toContain("Never introduce yourself by your job");
+    expect(prompt).toContain("## Sound like one person");
+    expect(prompt).toContain("I'm sorry I'm a wet brick.");
     expect(prompt).not.toContain("discord_call");
   });
 });

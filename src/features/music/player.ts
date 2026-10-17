@@ -18,6 +18,7 @@ import {
 import { PermissionFlagsBits, type Client, type VoiceBasedChannel } from "discord.js";
 import { config } from "../../config.js";
 import { UserError } from "../types.js";
+import { trackIsPlaying } from "./playback.js";
 import { MusicQueue, type Track } from "./queue.js";
 import { resolveQuery } from "./resolve.js";
 import { ytdlpCommonArgs, ytdlpFormatArgs } from "./ytdlp.js";
@@ -41,7 +42,7 @@ export class MusicPlayer {
     return {
       connected: Boolean(this.connection && this.connection.state.status !== VoiceConnectionStatus.Destroyed),
       channelId: this.connection?.joinConfig.channelId ?? null,
-      playing: this.player?.state.status === AudioPlayerStatus.Playing,
+      playing: trackIsPlaying(this.player?.state.status, this.current != null),
       paused: this.player?.state.status === AudioPlayerStatus.Paused,
       current: this.current
         ? {
@@ -414,13 +415,27 @@ export class MusicPlayer {
 
       const resource = createAudioResource(audio, { inputType: StreamType.Raw });
       this.current = track;
-      this.ensurePlayer().play(resource);
+      const player = this.ensurePlayer();
+      player.play(resource);
+      await this.waitUntilAudible(player);
     } catch (err) {
       this.stopPipeline();
       this.current = null;
       throw err;
     } finally {
       this.starting = false;
+    }
+  }
+
+  /** play() flips to Playing a moment after the bytes start. Buffering is already audible. */
+  private async waitUntilAudible(player: AudioPlayer): Promise<void> {
+    if (player.state.status === AudioPlayerStatus.Playing) return;
+    try {
+      await entersState(player, AudioPlayerStatus.Playing, 3_000);
+    } catch {
+      const status = player.state.status;
+      if (status === AudioPlayerStatus.Playing || status === AudioPlayerStatus.Buffering) return;
+      throw new UserError("The track was accepted but playback didn't start. Ask me to try again.");
     }
   }
 

@@ -8,14 +8,15 @@ import {
   type PartialMessage,
   type SendableChannels,
 } from "discord.js";
-import Anthropic from "@anthropic-ai/sdk";
+import { acknowledgement } from "./agent/ack.js";
 import { characters } from "./agent/characters/index.js";
+import { failureText, MISSING_REPLY, replyToMessage } from "./agent/failure.js";
 import { runAgent, clearHistory } from "./agent/loop.js";
 import { canControlDiscord, isAuthorized, isChannelAllowed } from "./auth.js";
 import { config } from "./config.js";
 import { takeCrewTurn } from "./crew/chain.js";
 import { startChatBots, stopChatBots } from "./crew/chatBots.js";
-import { crewIdsIn, describeCrew, isCrewUser, messageAddresses, registerCrewMember } from "./crew/roster.js";
+import { crewIdsIn, crewMentions, describeCrew, isCrewUser, messageAddresses, registerCrewMember } from "./crew/roster.js";
 import { hearsInterjection, holdFloor, noteHumanMessage, roomTranscript, taskHuman } from "./crew/room.js";
 import { createDiscordClient, createRest } from "./discord.js";
 import { features, startFeatures, stopFeatures } from "./features/index.js";
@@ -50,6 +51,8 @@ function chunk(text: string): string[] {
 /** How the agent talks back for one request (message reply vs. slash command). */
 interface Responder {
   update: (text: string) => Promise<void>;
+  /** A short line posted before a slow job, so the channel is not silent. */
+  notice: (text: string) => Promise<void>;
   finish: (text: string) => Promise<void>;
 }
 
@@ -64,42 +67,83 @@ function createReplyDraft(): ReplyDraft {
   };
 }
 
-function messageResponder(working: Message, channel: SendableChannels, reply: ReplyDraft): Responder {
+/** Typing while she works, then one normal channel message — no placeholder. */
+function channelResponder(channel: SendableChannels, reply: ReplyDraft): Responder {
   return {
-    update: async (text) => {
-      await working.edit({ content: text, allowedMentions: NO_MENTIONS }).catch(() => undefined);
+    update: async () => {
+      if ("sendTyping" in channel) await channel.sendTyping().catch(() => undefined);
+    },
+    notice: async (text) => {
+      await channel.send({ content: text, allowedMentions: NO_MENTIONS }).catch(() => undefined);
     },
     finish: async (text) => {
-      if (reply.embeds.length || reply.stickerIds.length) {
-        await finishRich(text, reply, {
-          edit: (body) => working.edit(body),
-          send: (content) => channel.send({ content, allowedMentions: USER_MENTIONS }).then(() => undefined),
-        });
-        return;
+      const caption = text.trim() || reply.content || "";
+      const parts = caption ? chunk(caption) : reply.embeds.length ? [""] : [MISSING_REPLY];
+      const first = parts[0] ?? MISSING_REPLY;
+      let sent = false;
+      const plain = async (content: string) => {
+        await channel.send({ content, allowedMentions: content ? USER_MENTIONS : NO_MENTIONS });
+        sent = true;
+      };
+      try {
+        if (reply.embeds.length || reply.stickerIds.length) {
+          try {
+            await channel.send({
+              content: first,
+              allowedMentions: USER_MENTIONS,
+              ...(reply.embeds.length ? { embeds: reply.embeds } : {}),
+              ...(reply.stickerIds.length ? { stickers: reply.stickerIds.slice(0, 3) } : {}),
+            });
+            sent = true;
+          } catch (err) {
+            console.error("[reply] failed to attach sticker or embed:", err);
+            await plain(first || MISSING_REPLY);
+          }
+        } else {
+          await plain(first);
+        }
+        for (const part of parts.slice(1)) {
+          if (part) await plain(part);
+        }
+      } catch (err) {
+        console.error("[reply] failed:", err);
+        if (sent) return;
+        await channel.send({ content: failureText(err, "sassy").slice(0, 1900), allowedMentions: NO_MENTIONS });
       }
-      const [first, ...others] = chunk(text);
-      await working.edit({ content: first, allowedMentions: USER_MENTIONS }).catch(() => undefined);
-      for (const part of others) await channel.send({ content: part, allowedMentions: USER_MENTIONS });
     },
   };
 }
 
 function interactionResponder(interaction: ChatInputCommandInteraction, reply: ReplyDraft): Responder {
   return {
-    update: async (text) => {
+    update: async () => {
+      // Keep the deferred slash reply as-is; no "still goin'" status spam.
+    },
+    notice: async (text) => {
       await interaction.editReply({ content: text, allowedMentions: NO_MENTIONS }).catch(() => undefined);
     },
     finish: async (text) => {
-      if (reply.embeds.length || reply.stickerIds.length) {
-        await finishRich(text, reply, {
-          edit: (body) => interaction.editReply(body),
-          send: (content) => interaction.followUp({ content, allowedMentions: USER_MENTIONS }).then(() => undefined),
-        });
-        return;
+      const caption = text.trim() || MISSING_REPLY;
+      try {
+        if (reply.embeds.length || reply.stickerIds.length) {
+          await finishRich(caption, reply, {
+            edit: (body) => interaction.editReply(body),
+            send: (content) => interaction.followUp({ content, allowedMentions: USER_MENTIONS }).then(() => undefined),
+          });
+          return;
+        }
+        const [first, ...others] = chunk(caption);
+        await interaction.editReply({ content: first, allowedMentions: USER_MENTIONS });
+        for (const part of others) await interaction.followUp({ content: part, allowedMentions: USER_MENTIONS });
+      } catch (err) {
+        console.error("[reply] slash reply failed:", err);
+        const content = failureText(err, "sassy").slice(0, 1900);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content, allowedMentions: NO_MENTIONS });
+        } else {
+          await interaction.reply({ content, ephemeral: true });
+        }
       }
-      const [first, ...others] = chunk(text);
-      await interaction.editReply({ content: first, allowedMentions: USER_MENTIONS }).catch(() => undefined);
-      for (const part of others) await interaction.followUp({ content: part, allowedMentions: USER_MENTIONS });
     },
   };
 }
@@ -140,21 +184,6 @@ async function finishRich(
   }
 }
 
-function friendlyError(err: unknown): string {
-  if (err instanceof Anthropic.AuthenticationError) {
-    return "Ah mate, the Anthropic API key got rejected. Check ANTHROPIC_API_KEY.";
-  }
-  if (err instanceof Anthropic.RateLimitError) {
-    return "Oi, Anthropic's rate limitin' me. Give it a moment and try again.";
-  }
-  if (err instanceof Anthropic.NotFoundError) {
-    return `The model "${config.model}" wasn't found, mate. Check ANTHROPIC_MODEL.`;
-  }
-  if (err instanceof Anthropic.APIError) {
-    return `Anthropic API error (${err.status ?? "unknown"}): ${err.message}`.slice(0, 500);
-  }
-  return `Somethin' went wrong, mate: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500);
-}
 
 async function handleRequest(params: {
   client: Client;
@@ -189,6 +218,9 @@ async function handleRequest(params: {
     reply: params.reply,
   };
 
+  const ack = params.fromCrew ? null : acknowledgement("sassy", params.text);
+  if (ack) await params.responder.notice(ack);
+
   try {
     const result = await runAgent({
       channelKey: params.channelId,
@@ -198,16 +230,18 @@ async function handleRequest(params: {
       botName: params.client.user?.username ?? "Agent",
       character: "sassy",
       fromCrew: params.fromCrew,
+      crew: params.client.user ? crewMentions(params.client.user.id) : undefined,
       crewNote: params.crewNote,
       room: params.room,
       ctx,
       onProgress: (status) => params.responder.update(status),
+      alreadyAcked: Boolean(ack),
     });
     console.log(
       `[agent] ${params.requesterName}: ${result.iterations} iteration(s), ` +
         `${result.inputTokens} in / ${result.outputTokens} out tokens`,
     );
-    await params.responder.finish(result.text);
+    await params.responder.finish(result.text.trim() || MISSING_REPLY);
   } catch (err) {
     console.error("[agent] request failed:", err);
     await audit({
@@ -218,7 +252,12 @@ async function handleRequest(params: {
       outcome: "error",
       detail: err instanceof Error ? err.message : String(err),
     });
-    await params.responder.finish(friendlyError(err));
+    try {
+      await params.responder.finish(failureText(err, "sassy"));
+    } catch (sendErr) {
+      console.error("[agent] could not send the error:", sendErr);
+      throw sendErr;
+    }
   }
 }
 
@@ -240,8 +279,11 @@ function remember(messageId: string): boolean {
 
 // A mention, a reply, or a line in a live conversation. Edits count too, so a later mention still wakes them.
 async function onSassyMessage(incoming: Message | PartialMessage): Promise<void> {
+  let message: Message | null = null;
+  let channel: SendableChannels | null = null;
+  let accepted = false;
   try {
-    const message = incoming.partial ? await incoming.fetch() : incoming;
+    message = incoming.partial ? await incoming.fetch() : incoming;
     if (!client.user || message.author.id === client.user.id || !message.inGuild()) return;
     if (message.guildId !== config.guildId) return;
     const fromCrew = message.author.bot && isCrewUser(message.author.id);
@@ -280,18 +322,23 @@ async function onSassyMessage(incoming: Message | PartialMessage): Promise<void>
     if (!addressed && !bare) return;
 
     const text = message.content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
-    if (!text) return;
+    const speakable = message.channel.isSendable() ? message.channel : null;
 
     if (!authorized) {
-      await message.reply({ content: "Yeah nah, mate. You're not authorized to use me.", allowedMentions: NO_MENTIONS });
+      if (addressed) await replyToMessage(message, speakable, "Yeah nah, mate. You're not authorized to use me.");
+      return;
+    }
+
+    if (!text) {
+      if (!addressed || !remember(message.id)) return;
+      await replyToMessage(message, speakable, "You mentioned me and didn't say anything.");
       return;
     }
 
     if (!fromCrew && addressed && /^(reset|forget|clear)$/i.test(text)) {
       if (!remember(message.id)) return;
       clearHistory(message.channelId);
-      const channel = message.channel.isSendable() ? message.channel : null;
-      if (channel) await channel.send({ content: "Alright. Wiped me memory for this channel. Fresh start.", allowedMentions: NO_MENTIONS });
+      await replyToMessage(message, speakable, "Alright. Wiped me memory for this channel. Fresh start.");
       return;
     }
 
@@ -302,8 +349,9 @@ async function onSassyMessage(incoming: Message | PartialMessage): Promise<void>
     const crewNote = describeCrew(selfId, fromCrew);
     holdFloor(message.channelId, selfId);
 
-    const channel = message.channel.isSendable() ? message.channel : null;
+    channel = speakable;
     if (!channel) return;
+    accepted = true;
     if ("sendTyping" in channel) await channel.sendTyping().catch(() => undefined);
 
     const remembered = fromCrew ? taskHuman(message.channelId) : undefined;
@@ -311,7 +359,6 @@ async function onSassyMessage(incoming: Message | PartialMessage): Promise<void>
     const requesterName = remembered?.name ?? message.member?.displayName ?? message.author.username;
     const requesterRoles = remembered?.roleIds ?? roleIds;
     const room = await roomTranscript(message);
-    const working = await channel.send({ content: "Oi, gimme a sec...", allowedMentions: NO_MENTIONS });
     const reply = createReplyDraft();
     await handleRequest({
       client,
@@ -326,12 +373,13 @@ async function onSassyMessage(incoming: Message | PartialMessage): Promise<void>
       room,
       fromCrew,
       crewNote,
-      responder: messageResponder(working, channel, reply),
+      responder: channelResponder(channel, reply),
       reply,
     });
     holdFloor(message.channelId, selfId);
   } catch (err) {
     console.error("[messageCreate] error:", err);
+    if (accepted && message) await replyToMessage(message, channel, failureText(err, "sassy"));
   }
 }
 
@@ -390,6 +438,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
     });
   } catch (err) {
     console.error("[interactionCreate] error:", err);
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.commandName !== "agent" && interaction.commandName !== "agent-reset") return;
+    const content = failureText(err, "sassy").slice(0, 1900);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content });
+      } else {
+        await interaction.reply({ content, ephemeral: true });
+      }
+    } catch (sendErr) {
+      console.error("[interactionCreate] could not send the error:", sendErr);
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp({ content, ephemeral: true }).catch((followErr) => {
+          console.error("[interactionCreate] follow-up failed:", followErr);
+        });
+      }
+    }
   }
 });
 

@@ -1,5 +1,7 @@
 import { Events, type Client, type Message, type PartialMessage, type SendableChannels } from "discord.js";
+import { acknowledgement } from "../agent/ack.js";
 import { characters, type CharacterId } from "../agent/characters/index.js";
+import { failureText, MISSING_REPLY, replyToMessage } from "../agent/failure.js";
 import { clearHistory, runAgent } from "../agent/loop.js";
 import { canControlDiscord, isAuthorized, isChannelAllowed } from "../auth.js";
 import { config } from "../config.js";
@@ -9,6 +11,7 @@ import { requestConfirmation } from "../safety/confirm.js";
 import type { REST } from "@discordjs/rest";
 import type { ReplyDraft } from "../tools/types.js";
 import { takeCrewTurn } from "./chain.js";
+import { whenClientReady } from "./ready.js";
 import {
   crewIdsIn,
   crewMentions,
@@ -23,6 +26,7 @@ const rests = new Map<CharacterId, REST>();
 const running: Client[] = [];
 const answered = new Set<string>();
 const USER_MENTIONS = { parse: ["users"] as ("users")[] };
+const NO_MENTIONS = { parse: [] as never[] };
 
 const CHAT_IDS = ["donny", "clarence", "mike"] as const;
 
@@ -49,7 +53,7 @@ function emptyReply(): ReplyDraft {
 
 async function say(channel: SendableChannels, text: string): Promise<void> {
   const parts: string[] = [];
-  let remaining = text.trim() || "...";
+  let remaining = text.trim() || MISSING_REPLY;
   while (remaining.length > 1900) {
     let cut = remaining.lastIndexOf("\n", 1900);
     if (cut < 900) cut = 1900;
@@ -59,8 +63,16 @@ async function say(channel: SendableChannels, text: string): Promise<void> {
   parts.push(remaining);
   const [first, ...rest] = parts;
   if (!first) return;
-  await channel.send({ content: first, allowedMentions: USER_MENTIONS });
-  for (const part of rest) await channel.send({ content: part, allowedMentions: USER_MENTIONS });
+  let sent = false;
+  try {
+    await channel.send({ content: first, allowedMentions: USER_MENTIONS });
+    sent = true;
+    for (const part of rest) await channel.send({ content: part, allowedMentions: USER_MENTIONS });
+  } catch (err) {
+    console.error("[crew] send failed:", err);
+    if (sent) return;
+    await channel.send({ content: failureText(err).slice(0, 1900), allowedMentions: NO_MENTIONS });
+  }
 }
 
 async function humanBehind(message: Message): Promise<Message> {
@@ -88,6 +100,8 @@ async function onChatMessage(
     return;
   }
 
+  let channel: SendableChannels | null = null;
+  let accepted = false;
   try {
     if (!client.user || message.author.id === client.user.id) return;
     if (!message.inGuild() || message.guildId !== config.guildId) return;
@@ -121,17 +135,22 @@ async function onChatMessage(
         roleIds,
       });
     }
-    if (!authorized) return;
-
     const bare = !fromCrew && hearsInterjection(message.channelId, client.user.id, crewHits);
     if (!addressed && !bare) return;
+
+    if (!authorized) {
+      if (addressed && message.channel.isSendable()) {
+        await replyToMessage(message, message.channel, "You're not authorized to use me here.");
+      }
+      return;
+    }
 
     const text = message.content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
     const channelKey = `${characterId}:${message.channelId}`;
     if (!fromCrew && addressed && /^(reset|forget|clear)$/i.test(text)) {
       if (!remember(`${characterId}:${message.id}`)) return;
       clearHistory(channelKey);
-      if (message.channel.isSendable()) await say(message.channel, "Started over.");
+      if (message.channel.isSendable()) await replyToMessage(message, message.channel, "Started over.");
       return;
     }
     if (!text && !addressed) return;
@@ -143,9 +162,11 @@ async function onChatMessage(
     const botName = client.user.username;
     holdFloor(message.channelId, selfId);
 
-    const channel = message.channel.isSendable() ? message.channel : null;
-    if (!channel) return;
-    if ("sendTyping" in channel) await channel.sendTyping().catch(() => undefined);
+    const live = message.channel.isSendable() ? message.channel : null;
+    channel = live;
+    if (!live) return;
+    accepted = true;
+    if ("sendTyping" in live) await live.sendTyping().catch(() => undefined);
 
     const remembered = fromCrew ? taskHuman(message.channelId) : undefined;
     const behind = fromCrew && !remembered ? await humanBehind(message) : message;
@@ -154,10 +175,22 @@ async function onChatMessage(
     const requesterRoles = remembered?.roleIds ?? (behind.member ? [...behind.member.roles.cache.keys()] : []);
     const room = await roomTranscript(message);
     const character = characters[characterId];
+    const requestText = text || "They mentioned you and didn't say anything else.";
+    const ack = fromCrew
+      ? null
+      : acknowledgement(characterId, requestText, `${message.channelId}\n${requestText}`);
+    if (ack) {
+      try {
+        await say(live, ack);
+      } catch (err) {
+        console.error(`[crew] ${characterId} ack failed:`, err);
+      }
+    }
     const result = await runAgent({
       channelKey,
       requesterName,
-      text: text || "They mentioned you and didn't say anything else.",
+      text: requestText,
+      alreadyAcked: Boolean(ack),
       room,
       guildName: message.guild.name,
       botName,
@@ -173,7 +206,7 @@ async function onChatMessage(
         discordControl: canControlDiscord({ userId: requesterId, roleIds: requesterRoles }),
         channelId: message.channelId,
         triggerMessageId: message.id,
-        confirm: (summary) => requestConfirmation(channel, requesterId, summary),
+        confirm: (summary) => requestConfirmation(live, requesterId, summary),
         reply: emptyReply(),
       },
     });
@@ -181,10 +214,11 @@ async function onChatMessage(
       `[crew] ${character.name} <- ${message.author.username}: ${result.iterations} iteration(s), ` +
         `${result.inputTokens} in / ${result.outputTokens} out tokens`,
     );
-    await say(channel, result.text);
+    await say(live, result.text.trim() || MISSING_REPLY);
     holdFloor(message.channelId, selfId);
   } catch (err) {
     console.error(`[crew] ${characterId} failed:`, err instanceof Error ? err.message : err);
+    if (accepted && channel) await replyToMessage(message, channel, failureText(err));
   }
 }
 
@@ -254,9 +288,10 @@ export async function startChatBots(): Promise<void> {
           userId: client.user.id,
         });
         const guild = await client.guilds.fetch(config.guildId).catch(() => null);
-        if (id === "clarence" && client.isReady()) {
+        if (id === "clarence") {
           try {
-            await musicFeature.start?.(client);
+            const ready = await whenClientReady(client);
+            await musicFeature.start?.(ready);
           } catch (err) {
             console.error("[crew] Clarence's music player failed to start:", err instanceof Error ? err.message : err);
           }
