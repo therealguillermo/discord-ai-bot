@@ -58,8 +58,12 @@ npm run dev                 # watch mode
 npm start
 ```
 
-On startup the bot logs in, checks that it is a member of `DISCORD_GUILD_ID`, and registers the `/agent` and
-`/agent-reset` slash commands for that server.
+On startup Sassy logs in, checks that she is a member of `DISCORD_GUILD_ID`, and registers the `/agent` and
+`/agent-reset` slash commands for that server. If `DONNYTHEDEALER` (or `DONNIETHEDEALER`), `CLARENCE`, and
+`MIKENOLAN` are set, those bots log in too. Clarence plays the music and runs the queue. Mike Nolan handles
+Discord administration. Donny handles Steam and CS lookups. Sassy keeps coins, games, images, and Damien.
+Ask any of them for music and they will order Clarence to do it. Each of those bots has to be invited to the
+server. Clarence needs Connect and Speak in voice channels. Mike needs permission to moderate.
 
 `.env` is gitignored. Never commit your tokens. If a token leaks, reset it in the Developer Portal or Anthropic console.
 

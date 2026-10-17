@@ -1,16 +1,21 @@
 import {
   ChatInputCommandInteraction,
   Events,
-  Message,
   Routes,
   SlashCommandBuilder,
   type Client,
+  type Message,
+  type PartialMessage,
   type SendableChannels,
 } from "discord.js";
 import Anthropic from "@anthropic-ai/sdk";
+import { characters } from "./agent/characters/index.js";
 import { runAgent, clearHistory } from "./agent/loop.js";
 import { canControlDiscord, isAuthorized, isChannelAllowed } from "./auth.js";
 import { config } from "./config.js";
+import { resetCrewChain, takeCrewTurn } from "./crew/chain.js";
+import { startChatBots, stopChatBots } from "./crew/chatBots.js";
+import { describeCrew, isCrewUser, messageAddresses, registerCrewMember } from "./crew/roster.js";
 import { createDiscordClient, createRest } from "./discord.js";
 import { features, startFeatures, stopFeatures } from "./features/index.js";
 import { audit, requestConfirmation } from "./safety/confirm.js";
@@ -21,6 +26,7 @@ const client = createDiscordClient();
 const rest = createRest();
 
 const NO_MENTIONS = { parse: [] as never[] };
+const USER_MENTIONS = { parse: ["users"] as ("users")[] };
 const MAX_DISCORD_LEN = 1900;
 
 /* -------------------------------------------------------------------------- */
@@ -66,13 +72,13 @@ function messageResponder(working: Message, channel: SendableChannels, reply: Re
       if (reply.embeds.length || reply.stickerIds.length) {
         await finishRich(text, reply, {
           edit: (body) => working.edit(body),
-          send: (content) => channel.send({ content, allowedMentions: NO_MENTIONS }).then(() => undefined),
+          send: (content) => channel.send({ content, allowedMentions: USER_MENTIONS }).then(() => undefined),
         });
         return;
       }
       const [first, ...others] = chunk(text);
-      await working.edit({ content: first, allowedMentions: NO_MENTIONS }).catch(() => undefined);
-      for (const part of others) await channel.send({ content: part, allowedMentions: NO_MENTIONS });
+      await working.edit({ content: first, allowedMentions: USER_MENTIONS }).catch(() => undefined);
+      for (const part of others) await channel.send({ content: part, allowedMentions: USER_MENTIONS });
     },
   };
 }
@@ -86,13 +92,13 @@ function interactionResponder(interaction: ChatInputCommandInteraction, reply: R
       if (reply.embeds.length || reply.stickerIds.length) {
         await finishRich(text, reply, {
           edit: (body) => interaction.editReply(body),
-          send: (content) => interaction.followUp({ content, allowedMentions: NO_MENTIONS }).then(() => undefined),
+          send: (content) => interaction.followUp({ content, allowedMentions: USER_MENTIONS }).then(() => undefined),
         });
         return;
       }
       const [first, ...others] = chunk(text);
-      await interaction.editReply({ content: first, allowedMentions: NO_MENTIONS }).catch(() => undefined);
-      for (const part of others) await interaction.followUp({ content: part, allowedMentions: NO_MENTIONS });
+      await interaction.editReply({ content: first, allowedMentions: USER_MENTIONS }).catch(() => undefined);
+      for (const part of others) await interaction.followUp({ content: part, allowedMentions: USER_MENTIONS });
     },
   };
 }
@@ -103,7 +109,7 @@ async function finishRich(
   transport: {
     edit: (body: {
       content: string | null;
-      allowedMentions: typeof NO_MENTIONS;
+      allowedMentions: typeof NO_MENTIONS | typeof USER_MENTIONS;
       embeds?: ReplyDraft["embeds"];
       stickers?: string[];
     }) => Promise<unknown>;
@@ -114,7 +120,7 @@ async function finishRich(
   const [first, ...others] = caption ? chunk(caption) : [null];
   const body = {
     content: first,
-    allowedMentions: NO_MENTIONS,
+    allowedMentions: USER_MENTIONS,
     ...(reply.embeds.length ? { embeds: reply.embeds } : {}),
     ...(reply.stickerIds.length ? { stickers: reply.stickerIds.slice(0, 3) } : {}),
   };
@@ -124,7 +130,7 @@ async function finishRich(
     console.error("[reply] failed to attach sticker or embed:", err);
     await transport.edit({
       content: first,
-      allowedMentions: NO_MENTIONS,
+      allowedMentions: USER_MENTIONS,
       ...(reply.embeds.length ? { embeds: reply.embeds } : {}),
     }).catch(() => undefined);
   }
@@ -159,6 +165,8 @@ async function handleRequest(params: {
   channel: SendableChannels | null;
   guildName: string;
   text: string;
+  fromCrew?: boolean;
+  crewNote?: string;
   responder: Responder;
   reply: ReplyDraft;
 }): Promise<void> {
@@ -185,6 +193,9 @@ async function handleRequest(params: {
       text: params.text,
       guildName: params.guildName,
       botName: params.client.user?.username ?? "Agent",
+      character: "sassy",
+      fromCrew: params.fromCrew,
+      crewNote: params.crewNote,
       ctx,
       onProgress: (status) => params.responder.update(status),
     });
@@ -211,11 +222,34 @@ async function handleRequest(params: {
 /* Triggers                                                                   */
 /* -------------------------------------------------------------------------- */
 
-// 1) @mention in a message
-client.on(Events.MessageCreate, async (message) => {
+const answered = new Set<string>();
+
+function remember(messageId: string): boolean {
+  if (answered.has(messageId)) return false;
+  answered.add(messageId);
+  if (answered.size > 400) {
+    const oldest = answered.values().next().value;
+    if (oldest) answered.delete(oldest);
+  }
+  return true;
+}
+
+// 1) @mention in a message. Edits count too, so a reply that adds a mention still wakes the others.
+async function onSassyMessage(incoming: Message | PartialMessage): Promise<void> {
   try {
-    if (message.author.bot || !message.inGuild() || !client.user) return;
-    if (!message.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true })) return;
+    const message = incoming.partial ? await incoming.fetch() : incoming;
+    if (!client.user || message.author.id === client.user.id || !message.inGuild()) return;
+    const fromCrew = message.author.bot && isCrewUser(message.author.id);
+    if (message.author.bot && !fromCrew) return;
+    if (
+      !messageAddresses(
+        message.content,
+        client.user.id,
+        message.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true }),
+      )
+    ) {
+      return;
+    }
 
     const text = message.content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
     if (!text) return;
@@ -238,10 +272,18 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-    if (/^(reset|forget|clear)$/i.test(text)) {
+    if (!fromCrew && /^(reset|forget|clear)$/i.test(text)) {
+      if (!remember(message.id)) return;
       clearHistory(message.channelId);
       await message.reply({ content: "Alright. Wiped me memory for this channel. Fresh start.", allowedMentions: NO_MENTIONS });
       return;
+    }
+
+    if (!remember(message.id)) return;
+    if (fromCrew) {
+      if (!takeCrewTurn(message.channelId)) return;
+    } else {
+      resetCrewChain(message.channelId);
     }
 
     const channel = message.channel.isSendable() ? message.channel : null;
@@ -259,13 +301,18 @@ client.on(Events.MessageCreate, async (message) => {
       channel,
       guildName: message.guild.name,
       text,
+      fromCrew,
+      crewNote: describeCrew(client.user.id, fromCrew),
       responder: messageResponder(working, channel, reply),
       reply,
     });
   } catch (err) {
     console.error("[messageCreate] error:", err);
   }
-});
+}
+
+client.on(Events.MessageCreate, (message) => void onSassyMessage(message));
+client.on(Events.MessageUpdate, (_prev, message) => void onSassyMessage(message));
 
 // 2) /agent and /agent-reset slash commands
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -312,6 +359,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       channel,
       guildName: interaction.guild?.name ?? "the server",
       text,
+      fromCrew: false,
+      crewNote: client.user ? describeCrew(client.user.id, false) : undefined,
       responder: interactionResponder(interaction, reply),
       reply,
     });
@@ -343,6 +392,7 @@ async function registerCommands(): Promise<void> {
 }
 
 client.once(Events.ClientReady, async (c) => {
+  registerCrewMember({ characterId: "sassy", name: characters.sassy.name, userId: c.user.id });
   console.log(`Logged in as ${c.user.tag}. Model: ${config.model}. ${endpointCount()} Discord operations available.`);
   const guild = await c.guilds.fetch(config.guildId).catch(() => null);
   if (!guild) {
@@ -373,10 +423,12 @@ process.on("unhandledRejection", (err) => console.error("Unhandled rejection:", 
 async function shutdown(signal: string) {
   console.log(`Received ${signal}, shutting down.`);
   await stopFeatures();
+  await stopChatBots();
   await client.destroy();
   process.exit(0);
 }
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
+void startChatBots();
 await client.login(config.discordToken);

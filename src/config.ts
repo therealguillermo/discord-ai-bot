@@ -27,6 +27,11 @@ const schema = z.object({
   /** Sassy's bot token. DISCORD_BOT_TOKEN is still accepted when this is unset. */
   SASSYTHESASQUATCH: optStr,
   DISCORD_BOT_TOKEN: optStr,
+  /** Donny's bot token. DONNIETHEDEALER is accepted as an alias. */
+  DONNYTHEDEALER: optStr,
+  DONNIETHEDEALER: optStr,
+  CLARENCE: optStr,
+  MIKENOLAN: optStr,
   DISCORD_APP_ID: snowflake,
   DISCORD_GUILD_ID: snowflake,
   OWNER_USER_ID: snowflake,
@@ -115,6 +120,13 @@ function load() {
     anthropicApiKey: e.ANTHROPIC_API_KEY,
     model: e.ANTHROPIC_MODEL,
     discordToken,
+    /** Tokens for the other personalities. Missing tokens are skipped at startup. */
+    characterTokens: {
+      sassy: discordToken,
+      donny: e.DONNYTHEDEALER ?? e.DONNIETHEDEALER,
+      clarence: e.CLARENCE,
+      mike: e.MIKENOLAN,
+    },
     appId: e.DISCORD_APP_ID,
     guildId: e.DISCORD_GUILD_ID,
     ownerId: e.OWNER_USER_ID,

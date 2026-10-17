@@ -1,4 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import type { CharacterId } from "../agent/characters/types.js";
+import { toolNamesFor } from "../agent/jobs.js";
 import { DiscordControlError } from "../auth.js";
 import { featureTools } from "../features/index.js";
 import { audit } from "../safety/confirm.js";
@@ -21,16 +23,17 @@ export const allTools: ToolDefinition[] = [
 
 const byName = new Map(allTools.map((t) => [t.name, t]));
 
-/** Tool definitions in the shape the Anthropic Messages API expects. */
-export function anthropicTools(): Anthropic.Tool[] {
-  return allTools.map((t, i) => {
+/** Tool definitions in the shape the Anthropic Messages API expects. Filtered to that bot's job. */
+export function anthropicTools(character: CharacterId = "sassy"): Anthropic.Tool[] {
+  const allowed = toolNamesFor(character);
+  const tools = allTools.filter((tool) => allowed.has(tool.name));
+  return tools.map((t, i) => {
     const tool: Anthropic.Tool = {
       name: t.name,
       description: t.description,
       input_schema: t.input_schema,
     };
-    // Cache the (large, static) tool list prefix: mark the last tool as a cache breakpoint.
-    if (i === allTools.length - 1) tool.cache_control = { type: "ephemeral" };
+    if (i === tools.length - 1) tool.cache_control = { type: "ephemeral" };
     return tool;
   });
 }

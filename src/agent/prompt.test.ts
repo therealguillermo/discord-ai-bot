@@ -14,9 +14,13 @@ describe("character voices", () => {
     const prompt = buildSystemPrompt({ ...base, character: "sassy" });
     expect(prompt).toContain("You are Sassy the Sasquatch");
     expect(prompt).toContain("surfer drawl");
-    expect(prompt).toContain("your only job is this server: music, coins, blackjack");
+    expect(prompt).toContain("Wadiyatalkinabeet?");
+    expect(prompt).toContain("what are you talking about");
+    expect(prompt).toContain("That handoff is the job");
+    expect(prompt).toContain("Order Clarence");
     expect(prompt).toContain("A real server request in the same message still gets done. If they also wandered off the job");
     expect(prompt).not.toContain("## The crew");
+    expect(prompt).toContain("from crew bot: yes");
     expect(prompt).toContain(characters.sassy.offJob);
     expect(characters.sassy.profile).toBe("locked");
   });
@@ -27,23 +31,58 @@ describe("character voices", () => {
     expect(prompt).toContain("Donny's Shop");
     expect(prompt).toContain("do not sell, source, price");
     expect(prompt).toContain("Clarence gets cruelty");
+    expect(prompt).toContain("You call him Nolzy, not Mike.");
+    expect(prompt).toContain("You're fucken' jokin'.");
+    expect(prompt).toContain("Fiddy bucks");
     expect(prompt).not.toContain("surfer drawl");
     expect(prompt).not.toContain("department");
   });
 
-  it("leaves Clarence's profile empty for the user's writeup", () => {
+  it("gives Clarence the timid voice the user supplied", () => {
     const prompt = buildSystemPrompt({ ...base, character: "clarence" });
-    expect(characters.clarence.profile).toBe("pending");
-    expect(characters.clarence.voice).toBe(PROFILE_PENDING);
-    expect(prompt).toContain(PROFILE_PENDING);
+    expect(characters.clarence.profile).toBe("supplied");
+    expect(prompt).toContain("You are timid, submissive, and desperate to belong");
+    expect(prompt).toContain("nasal, strained, and wavering");
+    expect(prompt).toContain("Ahow");
+    expect(prompt).toContain("Hoovin' Shmoovin'");
+    expect(prompt).toContain("Wanting to be liked does not change the rules");
+    expect(prompt).toContain("You call Mike Nolan Nolzy.");
+    expect(prompt).not.toContain(PROFILE_PENDING);
     expect(prompt).not.toContain("department");
   });
 
-  it("leaves Mike Nolan's profile empty for the user's writeup", () => {
+  it("gives Mike Nolan the construction-worker voice the user supplied", () => {
     const prompt = buildSystemPrompt({ ...base, character: "mike" });
-    expect(characters.mike.profile).toBe("pending");
-    expect(characters.mike.voice).toBe(PROFILE_PENDING);
-    expect(prompt).toContain(PROFILE_PENDING);
+    expect(characters.mike.profile).toBe("supplied");
+    expect(prompt).toContain("Mates call you Nolzy");
+    expect(prompt).toContain(`say "I'm fuckin' Mike Nolan."`);
+    expect(prompt).toContain("You do not call yourself Nolzy.");
+    expect(prompt).not.toContain("Call him Nolzy, not Mike.");
+    expect(prompt).toContain("broad Australian drawl");
+    expect(prompt).toContain("Fuck me sideways");
+    expect(prompt).toContain("I'll tell ya that much");
+    expect(prompt).toContain("You do not explain how to hide money");
+    expect(prompt).not.toContain(PROFILE_PENDING);
     expect(prompt).not.toContain("department");
+    const chat = buildSystemPrompt({ ...base, character: "mike", mode: "chat" });
+    expect(chat).toContain(`say "I'm fuckin' Mike Nolan."`);
+    expect(chat).not.toContain("Call him Nolzy, not Mike.");
+  });
+
+  it("lets the other bots talk in character and leaves the tools with Sassy", () => {
+    const prompt = buildSystemPrompt({
+      ...base,
+      character: "clarence",
+      mode: "chat",
+      crew: [
+        { name: "Donny the Dealer", mention: "<@100000000000000003>" },
+        { name: "Sassy the Sasquatch", mention: "<@100000000000000004>" },
+      ],
+    });
+    expect(prompt).toContain("You are timid, submissive, and desperate to belong");
+    expect(prompt).toContain("Music is yours");
+    expect(prompt).toContain("You always do it");
+    expect(prompt).toContain("## The crew");
+    expect(prompt).not.toContain("discord_call");
   });
 });

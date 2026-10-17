@@ -106,8 +106,12 @@ export class MusicPlayer {
 
   private async requesterVoiceChannel(requesterId: string): Promise<VoiceBasedChannel> {
     const guild = this.cachedGuild();
-    const member = await guild.members.fetch(requesterId).catch(() => null);
-    const voiceChannelId = member?.voice.channelId;
+    const cachedVoice = guild.voiceStates.cache.get(requesterId);
+    let voiceChannelId = cachedVoice?.channelId ?? null;
+    if (!voiceChannelId) {
+      const member = await guild.members.fetch(requesterId).catch(() => null);
+      voiceChannelId = member?.voice.channelId ?? null;
+    }
     if (!voiceChannelId) {
       throw new UserError("Join a voice channel first, then ask me again.");
     }

@@ -21,8 +21,9 @@ export const features: Feature[] = [
 /** Tools contributed by features, appended to the agent's toolbox. */
 export const featureTools: ToolDefinition[] = features.flatMap((f) => f.tools ?? []);
 
-export async function startFeatures(client: Client<true>): Promise<void> {
+export async function startFeatures(client: Client<true>, options?: { music?: boolean }): Promise<void> {
   for (const feature of features) {
+    if (feature === musicFeature && !options?.music) continue;
     try {
       await feature.start?.(client);
     } catch (err) {

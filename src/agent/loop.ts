@@ -2,8 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { anthropicTools, runTool } from "../tools/registry.js";
 import type { ToolContext } from "../tools/types.js";
+import type { CharacterId } from "./characters/index.js";
 import { bareInsult, hideJobRefusal } from "./offJob.js";
-import { buildSystemPrompt } from "./prompt.js";
+import { buildSystemPrompt, type CrewMention } from "./prompt.js";
 
 const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
 
@@ -20,6 +21,16 @@ export interface AgentRequest {
   guildName: string;
   botName: string;
   ctx: ToolContext;
+  /** Whose voice and memory this run uses. Sassy when omitted. */
+  character?: CharacterId;
+  /** Personality chat with no tools. Sassy leaves this unset. */
+  chatOnly?: boolean;
+  /** Other bots this one may mention. Used by chat mode. */
+  crew?: CrewMention[];
+  /** Trusted header note listing who is online. */
+  crewNote?: string;
+  /** True when the speaker is one of the other bots, not a person. */
+  fromCrew?: boolean;
   /** Called with short status text while tools run. */
   onProgress?: (status: string) => Promise<void> | void;
 }
@@ -60,15 +71,24 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
   const system: Anthropic.TextBlockParam[] = [
     {
       type: "text",
-      text: buildSystemPrompt({ guildName: req.guildName, guildId: req.ctx.guildId, botName: req.botName, ownerId: config.ownerId }),
+      text: buildSystemPrompt({
+        guildName: req.guildName,
+        guildId: req.ctx.guildId,
+        botName: req.botName,
+        ownerId: config.ownerId,
+        character: req.character,
+        mode: req.chatOnly ? "chat" : "operator",
+        crew: req.crew,
+      }),
       cache_control: { type: "ephemeral" },
     },
   ];
-  const tools = anthropicTools();
+  const tools = anthropicTools(req.character ?? "sassy");
 
   const userText =
-    `[Request from ${req.requesterName} (user ID ${req.ctx.requesterId}) in channel ID ${req.ctx.channelId} | discord control: ${req.ctx.discordControl ? "yes" : "no"}]\n${req.text}`;
+    `[Request from ${req.requesterName} (user ID ${req.ctx.requesterId}) in channel ID ${req.ctx.channelId} | discord control: ${req.ctx.discordControl ? "yes" : "no"} | from crew bot: ${req.fromCrew ? "yes" : "no"}${req.crewNote ? ` | ${req.crewNote}` : ""}]\n${req.text}`;
   const history = trimHistory(histories.get(req.channelKey) ?? []).map((turn, i, arr) => {
+    if (req.chatOnly) return turn;
     if (turn.role !== "assistant" || typeof turn.content !== "string") return turn;
     const prev = arr[i - 1];
     const prevText = prev && prev.role === "user" && typeof prev.content === "string" ? prev.content : "";
@@ -89,9 +109,9 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
     iterations++;
     const response = await anthropic.messages.create({
       model: config.model,
-      max_tokens: config.maxOutputTokens,
+      max_tokens: req.chatOnly ? Math.min(config.maxOutputTokens, 1024) : config.maxOutputTokens,
       system,
-      tools,
+      ...(tools.length ? { tools } : {}),
       messages,
     });
     inputTokens +=
@@ -130,10 +150,10 @@ async function execute(req: AgentRequest): Promise<AgentResult> {
     }
   }
 
-  const raw = `${finalText || (req.ctx.reply.embeds.length ? "" : "Done, mate.")}${stopNote}`.trim();
+  const raw = `${finalText || (req.chatOnly ? "..." : req.ctx.reply.embeds.length ? "" : "Done, mate.")}${stopNote}`.trim();
   const ownerTurn = req.ctx.requesterId === config.ownerId;
   let text = raw;
-  if (!ownerTurn && !usedTools) {
+  if (!req.chatOnly && !ownerTurn && !usedTools) {
     const seed = `${req.channelKey}\n${userText}`;
     text = hideJobRefusal(raw, seed, req.text);
     if (!text.trim() || /^done, mate\.?$/i.test(text)) text = bareInsult(seed);
