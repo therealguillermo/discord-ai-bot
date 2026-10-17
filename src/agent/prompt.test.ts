@@ -21,6 +21,10 @@ describe("character voices", () => {
     expect(prompt).toContain("A real server request in the same message still gets done. If they also wandered off the job");
     expect(prompt).not.toContain("## The crew");
     expect(prompt).toContain("from crew bot: yes");
+    expect(prompt).toContain("## One conversation");
+    expect(prompt).toContain("Banter with the other bots stays.");
+    expect(prompt).toContain("Overlapping messages are normal.");
+    expect(prompt).toContain("A newer message does not erase a server job");
     expect(prompt).toContain(characters.sassy.offJob);
     expect(characters.sassy.profile).toBe("locked");
   });
@@ -83,6 +87,9 @@ describe("character voices", () => {
     expect(prompt).toContain("Music is yours");
     expect(prompt).toContain("You always do it");
     expect(prompt).toContain("## The crew");
+    expect(prompt).toContain("## One conversation");
+    expect(prompt).toContain("Banter with the other bots stays.");
+    expect(prompt).toContain("Overlapping messages are normal.");
     expect(prompt).not.toContain("discord_call");
   });
 });

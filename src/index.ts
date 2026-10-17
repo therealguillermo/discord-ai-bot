@@ -13,9 +13,10 @@ import { characters } from "./agent/characters/index.js";
 import { runAgent, clearHistory } from "./agent/loop.js";
 import { canControlDiscord, isAuthorized, isChannelAllowed } from "./auth.js";
 import { config } from "./config.js";
-import { resetCrewChain, takeCrewTurn } from "./crew/chain.js";
+import { takeCrewTurn } from "./crew/chain.js";
 import { startChatBots, stopChatBots } from "./crew/chatBots.js";
-import { describeCrew, isCrewUser, messageAddresses, registerCrewMember } from "./crew/roster.js";
+import { crewIdsIn, describeCrew, isCrewUser, messageAddresses, registerCrewMember } from "./crew/roster.js";
+import { hearsInterjection, holdFloor, noteHumanMessage, roomTranscript, taskHuman } from "./crew/room.js";
 import { createDiscordClient, createRest } from "./discord.js";
 import { features, startFeatures, stopFeatures } from "./features/index.js";
 import { audit, requestConfirmation } from "./safety/confirm.js";
@@ -167,6 +168,8 @@ async function handleRequest(params: {
   text: string;
   fromCrew?: boolean;
   crewNote?: string;
+  /** Recent channel lines so this turn sits in the same chat. */
+  room?: string;
   responder: Responder;
   reply: ReplyDraft;
 }): Promise<void> {
@@ -196,6 +199,7 @@ async function handleRequest(params: {
       character: "sassy",
       fromCrew: params.fromCrew,
       crewNote: params.crewNote,
+      room: params.room,
       ctx,
       onProgress: (status) => params.responder.update(status),
     });
@@ -234,78 +238,98 @@ function remember(messageId: string): boolean {
   return true;
 }
 
-// 1) @mention in a message. Edits count too, so a reply that adds a mention still wakes the others.
+// A mention, a reply, or a line in a live conversation. Edits count too, so a later mention still wakes them.
 async function onSassyMessage(incoming: Message | PartialMessage): Promise<void> {
   try {
     const message = incoming.partial ? await incoming.fetch() : incoming;
     if (!client.user || message.author.id === client.user.id || !message.inGuild()) return;
+    if (message.guildId !== config.guildId) return;
     const fromCrew = message.author.bot && isCrewUser(message.author.id);
     if (message.author.bot && !fromCrew) return;
-    if (
-      !messageAddresses(
-        message.content,
-        client.user.id,
-        message.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true }),
-      )
-    ) {
-      return;
-    }
-
-    const text = message.content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
-    if (!text) return;
 
     const parentId = message.channel.isThread() ? message.channel.parentId : null;
-    // Wrong server or a channel the agent is not enabled in: stay silent.
-    if (message.guildId !== config.guildId || !isChannelAllowed(message.channelId, parentId)) return;
+    if (!isChannelAllowed(message.channelId, parentId)) return;
 
     const roleIds = message.member ? [...message.member.roles.cache.keys()] : [];
-    if (
-      !isAuthorized({
+    const authorized =
+      fromCrew ||
+      isAuthorized({
         guildId: message.guildId,
         channelId: message.channelId,
         parentChannelId: parentId,
         userId: message.author.id,
         roleIds,
-      })
-    ) {
+      });
+    const crewHits = crewIdsIn(message.content, message.mentions.users.keys(), message.mentions.repliedUser?.id);
+    const addressed =
+      crewHits.includes(client.user.id) ||
+      messageAddresses(
+        message.content,
+        client.user.id,
+        message.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true }),
+      );
+    if (!fromCrew && authorized) {
+      noteHumanMessage(message.channelId, message.id, crewHits, {
+        userId: message.author.id,
+        name: message.member?.displayName ?? message.author.username,
+        roleIds,
+      });
+    }
+
+    const bare = !fromCrew && hearsInterjection(message.channelId, client.user.id, crewHits);
+    if (!addressed && !bare) return;
+
+    const text = message.content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
+    if (!text) return;
+
+    if (!authorized) {
       await message.reply({ content: "Yeah nah, mate. You're not authorized to use me.", allowedMentions: NO_MENTIONS });
       return;
     }
 
-    if (!fromCrew && /^(reset|forget|clear)$/i.test(text)) {
+    if (!fromCrew && addressed && /^(reset|forget|clear)$/i.test(text)) {
       if (!remember(message.id)) return;
       clearHistory(message.channelId);
-      await message.reply({ content: "Alright. Wiped me memory for this channel. Fresh start.", allowedMentions: NO_MENTIONS });
+      const channel = message.channel.isSendable() ? message.channel : null;
+      if (channel) await channel.send({ content: "Alright. Wiped me memory for this channel. Fresh start.", allowedMentions: NO_MENTIONS });
       return;
     }
 
     if (!remember(message.id)) return;
-    if (fromCrew) {
-      if (!takeCrewTurn(message.channelId)) return;
-    } else {
-      resetCrewChain(message.channelId);
-    }
+    if (fromCrew && !takeCrewTurn(message.channelId)) return;
+
+    const selfId = client.user.id;
+    const crewNote = describeCrew(selfId, fromCrew);
+    holdFloor(message.channelId, selfId);
 
     const channel = message.channel.isSendable() ? message.channel : null;
     if (!channel) return;
-    const working = await message.reply({ content: "Oi, gimme a sec...", allowedMentions: NO_MENTIONS });
-    const reply = createReplyDraft();
+    if ("sendTyping" in channel) await channel.sendTyping().catch(() => undefined);
 
+    const remembered = fromCrew ? taskHuman(message.channelId) : undefined;
+    const requesterId = remembered?.userId ?? message.author.id;
+    const requesterName = remembered?.name ?? message.member?.displayName ?? message.author.username;
+    const requesterRoles = remembered?.roleIds ?? roleIds;
+    const room = await roomTranscript(message);
+    const working = await channel.send({ content: "Oi, gimme a sec...", allowedMentions: NO_MENTIONS });
+    const reply = createReplyDraft();
     await handleRequest({
       client,
-      requesterId: message.author.id,
-      requesterName: message.member?.displayName ?? message.author.username,
-      discordControl: canControlDiscord({ userId: message.author.id, roleIds }),
+      requesterId,
+      requesterName,
+      discordControl: canControlDiscord({ userId: requesterId, roleIds: requesterRoles }),
       channelId: message.channelId,
       triggerMessageId: message.id,
       channel,
       guildName: message.guild.name,
       text,
+      room,
       fromCrew,
-      crewNote: describeCrew(client.user.id, fromCrew),
+      crewNote,
       responder: messageResponder(working, channel, reply),
       reply,
     });
+    holdFloor(message.channelId, selfId);
   } catch (err) {
     console.error("[messageCreate] error:", err);
   }

@@ -90,5 +90,5 @@ Music belongs to Clarence. Discord administration belongs to Nolzy (Mike Nolan).
 
 If the request is not your job, do not call a tool and do not do the work. Hand it to the owner. One short reply. @mention only that owner and repeat the request exactly.
 Music is the loud handoff. If you are not Clarence and they asked for music, be aggressive. Order Clarence. No apology. No "I can't". No "not my job".
-A job you finished does not @mention anyone. A handoff @mentions only the owner. Casual chat is the only time you @mention someone for conversation.`;
+A job you finished does not @mention anyone. A handoff @mentions only the owner. Casual chat is the only time you @mention someone for conversation. That mention stays in this same channel conversation.`;
 }

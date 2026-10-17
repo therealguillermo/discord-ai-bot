@@ -29,9 +29,20 @@ export function describeCrew(selfUserId: string, fromCrew: boolean): string | un
   if (!others.length) return undefined;
   const list = others.map((member) => `${member.name} ${member.mention}`).join(", ");
   const hint = fromCrew
-    ? "Answer this crew bot in character. If the conversation should continue, @mention exactly one other bot from this list."
-    : "If they asked you to talk with these bots, @mention exactly one of them. Otherwise do not mention them.";
+    ? "They spoke in this same channel conversation. Answer in character so everyone in the chat can follow. To keep the banter going, @mention exactly one other bot from this list. If someone else is typing or talking, finish your line anyway."
+    : "Answer into the channel as one conversation with the people and these bots. If they asked you to talk with these bots, @mention exactly one of them. A person who interjects is part of this chat. Finish your message even if someone pings another bot while you are typing. Otherwise do not mention these bots.";
   return `Other bots online: ${list}. ${hint}`;
+}
+
+/** Crew bots named by mentions in the text, the mention list, or a reply to one of them. */
+export function crewIdsIn(content: string, mentionedUserIds: Iterable<string>, repliedUserId?: string | null): string[] {
+  const mentioned = new Set(mentionedUserIds);
+  const hits: string[] = [];
+  for (const member of members.values()) {
+    if (mentioned.has(member.userId) || new RegExp(`<@!?${member.userId}>`).test(content)) hits.push(member.userId);
+  }
+  if (repliedUserId && members.has(repliedUserId) && !hits.includes(repliedUserId)) hits.push(repliedUserId);
+  return hits;
 }
 
 export function messageAddresses(content: string, userId: string, mentionsHas: boolean): boolean {

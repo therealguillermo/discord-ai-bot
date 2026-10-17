@@ -1,19 +1,21 @@
 import type { Message } from "discord.js";
 import { resetCrewChain } from "./chain.js";
-import { withoutCrewPings } from "./roster.js";
 
 /** How long a channel stays one live conversation after a bot takes the floor. */
 export const ROOM_ACTIVE_MS = 3 * 60 * 1000;
 
+export interface FloorHuman {
+  userId: string;
+  name: string;
+  roleIds: string[];
+}
+
 interface Room {
-  /** Created-at time of the newest human message that joined this channel. */
-  humanCutAt: number;
-  /** Crew user ids the newest human message spoke to, if any. */
-  latestHumanMentions: string[];
+  /** Person whose request the tools should run as. A bare interjection does not replace them. */
+  taskHuman?: FloorHuman;
   /** Discord user id of the bot currently carrying the conversation. */
   lastSpeakerId?: string;
   activeUntil: number;
-  tail: Promise<unknown>;
 }
 
 const rooms = new Map<string, Room>();
@@ -22,7 +24,7 @@ const notedHumans = new Set<string>();
 function roomFor(channelId: string): Room {
   let room = rooms.get(channelId);
   if (!room) {
-    room = { humanCutAt: 0, latestHumanMentions: [], activeUntil: 0, tail: Promise.resolve() };
+    room = { activeUntil: 0 };
     rooms.set(channelId, room);
   }
   return room;
@@ -39,38 +41,24 @@ function rememberHuman(messageId: string): boolean {
 }
 
 /**
- * A person spoke in the channel. Later bot-to-bot turns from before this
- * message are part of the old side of the conversation and should yield.
- * The chain budget starts over so banter can continue from here.
+ * A person spoke in the channel. The chain budget starts over so banter
+ * can continue, and the task human is updated when they name a bot.
  */
 export function noteHumanMessage(
   channelId: string,
-  createdTimestamp: number,
   messageId: string,
   mentionedCrewIds: string[],
+  human?: FloorHuman,
 ): void {
   if (!rememberHuman(messageId)) return;
   const room = roomFor(channelId);
-  if (createdTimestamp >= room.humanCutAt) {
-    room.humanCutAt = createdTimestamp;
-    room.latestHumanMentions = mentionedCrewIds;
-  }
+  if (human && (mentionedCrewIds.length > 0 || !room.taskHuman)) room.taskHuman = human;
   resetCrewChain(channelId);
 }
 
-/** True when a person has spoken since this trigger message was created. */
-export function isSuperseded(channelId: string, triggerAt: number): boolean {
-  return roomFor(channelId).humanCutAt > triggerAt;
-}
-
-/**
- * Unsent banter yields to the newer human message.
- * A task that already ran still gets said, without a ping that would start a second chain.
- */
-export function settleReply(channelId: string, triggerAt: number, usedTools: boolean, text: string): string | null {
-  if (!isSuperseded(channelId, triggerAt)) return text;
-  if (!usedTools) return null;
-  return withoutCrewPings(text);
+/** Human a crew turn should act for. Undefined until someone in the channel has spoken. */
+export function taskHuman(channelId: string): FloorHuman | undefined {
+  return rooms.get(channelId)?.taskHuman;
 }
 
 /** This bot picks up a human line that did not name anyone, while the conversation is live. */
@@ -81,22 +69,11 @@ export function hearsInterjection(channelId: string, selfId: string, mentionedCr
   return room.lastSpeakerId === selfId;
 }
 
-/** Take the floor so the next bare interjection comes to this bot, not a second conversation. */
+/** Take the floor so the next bare interjection comes to this bot. */
 export function holdFloor(channelId: string, userId: string): void {
   const room = roomFor(channelId);
   room.lastSpeakerId = userId;
   room.activeUntil = Date.now() + ROOM_ACTIVE_MS;
-}
-
-/** One speaker at a time per channel. A ping and an interjection queue into the same chat. */
-export function enqueueRoom<T>(channelId: string, work: () => Promise<T>): Promise<T> {
-  const room = roomFor(channelId);
-  const run = room.tail.catch(() => undefined).then(work);
-  room.tail = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
 }
 
 export interface RoomLine {
