@@ -98,6 +98,32 @@ const schema = z.object({
     .optional()
     .transform((v) => (v == null || v.trim() === "" ? true : !/^(0|false|no|off)$/i.test(v.trim()))),
   CS_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).max(3600).default(120),
+
+  /** Oracle VM SSH. All three of host, user, and key path are required together. */
+  VM_SSH_HOST: optStr,
+  VM_SSH_PORT: z.coerce.number().int().min(1).max(65535).default(22),
+  VM_SSH_USER: optStr,
+  VM_SSH_PRIVATE_KEY_PATH: optStr,
+  VM_SSH_KEY_PASSPHRASE: optStr,
+  /** SHA256 host key, with or without the SHA256: prefix. Unset accepts the key and logs it once. */
+  VM_SSH_HOST_FINGERPRINT: optStr,
+  /** Which character receives vm_exec and vm_tmux. */
+  VM_AGENT: z.enum(["sassy", "donny", "clarence", "mike"]).default("sassy"),
+}).superRefine((val, ctx) => {
+  if (!val.VM_SSH_HOST && !val.VM_SSH_USER && !val.VM_SSH_PRIVATE_KEY_PATH) return;
+  if (!val.VM_SSH_HOST) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["VM_SSH_HOST"], message: "required when VM SSH is configured" });
+  }
+  if (!val.VM_SSH_USER) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["VM_SSH_USER"], message: "required when VM SSH is configured" });
+  }
+  if (!val.VM_SSH_PRIVATE_KEY_PATH) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["VM_SSH_PRIVATE_KEY_PATH"],
+      message: "required when VM SSH is configured",
+    });
+  }
 });
 
 function load() {
@@ -161,6 +187,19 @@ function load() {
     csstEnabled: e.CSST_ENABLED,
     cstrackerEnabled: e.CSTRACKER_ENABLED,
     csCacheTtlSeconds: e.CS_CACHE_TTL_SECONDS,
+
+    vm:
+      e.VM_SSH_HOST && e.VM_SSH_USER && e.VM_SSH_PRIVATE_KEY_PATH
+        ? {
+            host: e.VM_SSH_HOST,
+            port: e.VM_SSH_PORT,
+            user: e.VM_SSH_USER,
+            keyPath: e.VM_SSH_PRIVATE_KEY_PATH,
+            passphrase: e.VM_SSH_KEY_PASSPHRASE,
+            fingerprint: e.VM_SSH_HOST_FINGERPRINT?.replace(/^SHA256:/, ""),
+            agent: e.VM_AGENT,
+          }
+        : undefined,
   };
 }
 

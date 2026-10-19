@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toolNamesFor } from "./jobs.js";
+import { characterTools, toolNamesFor } from "./jobs.js";
 
 describe("job tools", () => {
   it("gives Clarence music and nobody else", () => {
@@ -22,6 +22,15 @@ describe("job tools", () => {
     expect(toolNamesFor("donny").has("cs_player")).toBe(true);
     expect(toolNamesFor("sassy").has("cs_player")).toBe(false);
     expect(toolNamesFor("mike").has("steam_profile")).toBe(false);
+  });
+
+  it("gives the Oracle VM to whichever character is chosen", () => {
+    expect(characterTools("sassy", "sassy").has("vm_exec")).toBe(true);
+    expect(characterTools("sassy", "sassy").has("vm_tmux")).toBe(true);
+    expect(characterTools("mike", "sassy").has("vm_exec")).toBe(false);
+    expect(characterTools("mike", "mike").has("vm_tmux")).toBe(true);
+    expect(characterTools("clarence", null).has("vm_exec")).toBe(false);
+    expect(characterTools("donny", "donny").has("vm_exec")).toBe(true);
   });
 
   it("leaves coins, games, images, and Damien with Sassy", () => {
